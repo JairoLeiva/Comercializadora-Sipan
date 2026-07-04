@@ -1,59 +1,53 @@
 # Sistema de Gestión de Inventario Web - Comercializadora Sipán S.A.C.
 
-Este repositorio contiene el código fuente de un sistema de gestión integral desarrollado para automatizar el control de almacén, ventas al por mayor y auditoría de Comercializadora Sipán[cite: 1, 2]. 
+¡Hola! Este repositorio contiene el código fuente de un sistema de gestión web que desarrollé para automatizar el control de almacén, las ventas al por mayor y la auditoría de la empresa Comercializadora Sipán. 
 
-El proyecto fue diseñado e implementado como parte del curso de Diseño e Implementación de Arquitectura Empresarial de la Facultad de Ingeniería de la Universidad Tecnológica del Perú (UTP), bajo la autoría de Jairo Fabian Leiva Torres[cite: 2].
+Diseñé e implementé este proyecto como parte de mi Avance 2 para el curso de Diseño e Implementación de Arquitectura Empresarial en la Universidad Tecnológica del Perú (UTP).
 
-## 1. Descripción y Solución del Problema
+## 1. El problema que busco resolver
 
-Antes de la implementación, la distribuidora mayorista gestionaba su inventario de abarrotes y productos de limpieza mediante hojas de cálculo y registros físicos[cite: 1, 2]. Esto generaba tiempos de consulta prolongados, falta de alertas de quiebre de stock y nula trazabilidad sobre las modificaciones[cite: 1, 2].
+Antes de este sistema, la distribuidora llevaba todo su inventario a mano utilizando cuadernos y hojas de Excel. Esto generaba problemas reales: consultar el stock tomaba mucho tiempo, había errores de cálculo en las ventas, no existían alertas cuando un producto estaba por agotarse y no había forma de auditar quién modificaba los datos. 
 
-La solución implementada es una plataforma web robusta que centraliza la información en un servidor, automatiza el kardex, emite comprobantes de venta y genera reportes en tiempo real, eliminando por completo la dependencia de procesos manuales[cite: 1, 2].
+Para solucionar esto, construí esta plataforma web que centraliza toda la información en un servidor local, automatiza el kardex, emite boletas y genera reportes en tiempo real.
 
-## 2. Arquitectura del Sistema (Cero Dependencias Externas)
+## 2. Arquitectura "Cero Dependencias" (Vanilla)
 
-El sistema ha sido construido bajo un enfoque de **Cero Dependencias** (Vanilla), lo que garantiza un bajo acoplamiento, alta portabilidad y máxima seguridad al no depender de librerías de terceros[cite: 1, 2]. Se estructura en un modelo de 3 capas[cite: 1, 2]:
+Una de las características técnicas que más destaco de mi proyecto es que decidí construirlo desde cero, sin utilizar frameworks ni librerías externas. Esto hace que el sistema sea extremadamente ligero, portátil y muy seguro. Lo estructuré en 3 capas bien definidas:
 
-* **Capa de Presentación (Cliente):** Interfaz desarrollada puramente con HTML, CSS y JavaScript[cite: 1, 2]. No se utilizan frameworks de diseño, y los gráficos de los reportes son renderizados matemáticamente mediante SVG nativo.
-* **Capa de Lógica de Negocio (Servidor / API REST):** Desarrollado en Node.js puro (versión 22.5+), sin la utilización de frameworks intermediarios como Express[cite: 1, 2]. Controla las reglas de negocio, validaciones y la comunicación mediante métodos HTTP (GET, POST, PUT, DELETE)[cite: 1, 2].
-* **Capa de Datos:** Integrada directamente en el servidor utilizando el motor SQLite nativo de Node.js, garantizando transacciones seguras (ACID)[cite: 1, 2].
+* **Frontend (Presentación):** Programé toda la interfaz únicamente con HTML, CSS y JavaScript puros. Incluso los gráficos de los reportes los genero matemáticamente dibujando con SVG nativo, sin librerías externas.
+* **Backend (API REST y Lógica):** El servidor está hecho con Node.js puro. Yo mismo me encargué de manejar las rutas HTTP (GET, POST, PUT, DELETE) y las reglas de negocio sin usar Express u otros intermediarios.
+* **Base de Datos:** Utilizo SQLite, aprovechando que ya viene integrado de forma nativa en las versiones recientes de Node.js, lo que me permite manejar transacciones seguras (ACID) sin instalar motores externos.
 
-## 3. Modelo de Datos Relacional
+## 3. Modelo de Datos
 
-La base de datos asegura la integridad referencial y se compone de 10 tablas estratégicamente agrupadas[cite: 1, 2]:
+Estructuré la base de datos con 10 tablas relacionadas mediante claves foráneas para garantizar que no existan datos huérfanos. Se dividen en tres grandes módulos:
+* **Inventario:** `categorias`, `productos`, `movimientos`.
+* **Ventas:** `boletas`, `boleta_items`, `tickets`.
+* **Seguridad:** `usuarios`, `sesiones`, `intentos`, `auditoria`.
 
-1. **Inventario:** `categorias`, `productos`, `movimientos`[cite: 1, 2].
-2. **Ventas y Atención:** `boletas`, `boleta_items`, `tickets`[cite: 1, 2].
-3. **Seguridad y Control:** `usuarios`, `sesiones`, `intentos`, `auditoria`[cite: 1, 2].
+## 4. Seguridad y Criptografía
 
-## 4. Capas de Seguridad y Criptografía
+En este proyecto no confío únicamente en las validaciones visuales del navegador; el peso de la seguridad está en el servidor. Implementé las siguientes capas de protección:
 
-El sistema no confía en las validaciones del cliente e implementa seguridad de grado empresarial directamente en el servidor[cite: 1, 2]:
+* **Criptografía de contraseñas:** Ninguna clave se guarda en texto plano. Las proceso en el backend usando el algoritmo `scrypt` junto a una "sal" criptográfica única para cada cuenta.
+* **Autenticación en 2 Pasos (2FA/TOTP):** Integré el estándar de contraseñas de un solo uso. Para roles altos (como el Gerente), es obligatorio escanear un QR y usar una app como Google Authenticator para iniciar sesión.
+* **reCAPTCHA:** Integré la validación de Google, verificando el token directamente desde mi servidor contra los servidores de Google.
+* **Defensas de Infraestructura:** El sistema bloquea temporalmente una cuenta si detecta 5 intentos de acceso fallidos (Fuerza Bruta). Además, utilizo consultas SQL parametrizadas para evitar Inyecciones SQL y exijo tokens dinámicos en cada petición para evitar ataques CSRF.
 
-* **Criptografía de Contraseñas:** Las claves nunca se almacenan en texto plano[cite: 1, 2]. Se procesan mediante el algoritmo `scrypt` combinado con una "sal" criptográfica única por usuario.
-* **Autenticación de Dos Factores (2FA/TOTP):** Implementación del estándar de contraseña de un solo uso basada en el tiempo, compatible con Google Authenticator[cite: 1, 2]. Es de uso obligatorio para cuentas de alta jerarquía[cite: 1, 2].
-* **Protección contra ataques automatizados:** Integración de Google reCAPTCHA validado directamente contra los servidores de Google[cite: 1, 2].
-* **Defensa de Infraestructura:** 
-  * Prevención de ataques de Fuerza Bruta: Bloqueo temporal de cuentas tras 5 intentos fallidos[cite: 1, 2].
-  * Prevención SQLi: Uso estricto de consultas SQL parametrizadas[cite: 1, 2].
-  * Prevención CSRF: Tokens dinámicos requeridos en cada operación de escritura[cite: 1, 2].
-  * Cabeceras de seguridad HTTP configuradas desde el backend[cite: 1, 2].
+## 5. Módulos Principales
 
-## 5. Módulos y Funcionalidades Principales
+* **Roles Validados:** Existen 4 perfiles (Gerente General, Administrador, Vendedor y Reponedor). Si alguien intenta acceder a una ruta de la API sin el rol necesario, el servidor bloquea la acción inmediatamente.
+* **Kardex Seguro:** El registro de entradas y salidas es inmutable. Como regla de negocio, el servidor rechaza cualquier salida que intente superar el stock físico disponible.
+* **Ventas y Boletas:** Al emitir una venta, el sistema descuenta el stock de todos los productos en una sola transacción en bloque y genera una boleta con número correlativo automático.
+* **Auditoría Silenciosa:** Cada acción que modifica la base de datos queda guardada en un historial con la fecha, el usuario y el motivo exacto de la operación.
 
-* **Control de Acceso por Roles:** Los permisos se validan en el servidor, impidiendo accesos forzados a la API[cite: 1]. Se dividen en Gerente General (Control total), Administrador, Vendedor y Reponedor[cite: 1, 2].
-* **Kardex Transaccional:** Registro inmutable de entradas y salidas de almacén[cite: 1, 2]. Una salida es rechazada por el servidor si supera el stock disponible[cite: 1, 2].
-* **Facturación Mayorista:** Emisión de boletas con numeración correlativa y procesamiento de operaciones en bloque bajo una única transacción SQL[cite: 1, 2].
-* **Alertas Inteligentes:** El sistema detecta y resalta visualmente productos que perforan su stock mínimo preconfigurado[cite: 1, 2].
-* **Trazabilidad:** Un módulo de auditoría registra silenciosamente cada acción, guardando la fecha, el usuario responsable y el detalle de la operación[cite: 1, 2].
+## 6. Pruebas Automáticas (Testing)
 
-## 6. Aseguramiento de Calidad (Testing)
+Para demostrar que el sistema no solo se ve bien, sino que es robusto, programé un entorno de pruebas automáticas. Al correr un solo comando, el sistema crea una base de datos temporal y ejecuta **75 pruebas unitarias y de integración**. Estas pruebas revisan desde el correcto funcionamiento del login y los permisos, hasta que el stock no se descuadre en transacciones grandes. Actualmente el proyecto pasa las 75 pruebas sin fallos.
 
-El repositorio incluye un motor de pruebas automatizadas (Test-Driven Development)[cite: 1]. Al ejecutar el comando de testeo, el sistema despliega una base de datos temporal y ejecuta **75 pruebas unitarias y de integración**[cite: 1, 2]. Estas auditan desde la seguridad de los endpoints hasta el correcto descuento de inventario en transacciones simultáneas[cite: 1].
+## 7. Cómo probarlo en tu computadora
 
-## 7. Instrucciones de Despliegue Local
-
-Para ejecutar el sistema, se requiere contar con **Node.js v22.5** o superior[cite: 1].
+Si deseas clonar y probar el sistema localmente, asegúrate de tener instalado **Node.js v22.5** o superior.
 
 1. **Clonar el proyecto:**
    ```bash
