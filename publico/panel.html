@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="es" data-tema="claro">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Panel de inventario de Comercializadora Sipan">
+  <title>Panel | SIPAN Inventario</title>
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+  <div class="panel">
+
+    <!-- Menu lateral -->
+    <aside class="lateral escalones">
+      <div class="lateral-marca">
+        <img src="img/logo.svg" alt="Logo SIPAN" width="36" height="36">
+        <div>
+          <strong>SIPAN</strong>
+          <span>Inventario</span>
+        </div>
+      </div>
+
+      <nav class="lateral-nav" aria-label="Secciones del sistema">
+        <a href="#inventario" data-vista="inventario" class="nav-item">Inventario</a>
+        <a href="#movimientos" data-vista="movimientos" class="nav-item" id="nav_movimientos">Movimientos</a>
+        <a href="#ventas" data-vista="ventas" class="nav-item" id="nav_ventas" hidden>Venta mayorista</a>
+        <a href="#tickets" data-vista="tickets" class="nav-item" id="nav_tickets">Tickets</a>
+        <a href="#reportes" data-vista="reportes" class="nav-item" id="nav_reportes">Reportes</a>
+        <a href="#usuarios" data-vista="usuarios" class="nav-item" id="nav_usuarios" hidden>Usuarios</a>
+        <a href="#auditoria" data-vista="auditoria" class="nav-item" id="nav_auditoria" hidden>Auditoria</a>
+        <a href="#perfil" data-vista="perfil" class="nav-item">Mi perfil</a>
+      </nav>
+
+      <div class="lateral-pie">
+        <button id="boton_tema" class="boton-lateral" type="button">Cambiar tema</button>
+        <button id="boton_salir" class="boton-lateral boton-lateral-rojo" type="button">Cerrar sesion</button>
+      </div>
+    </aside>
+
+    <main class="contenido">
+
+      <header class="cabecera-panel">
+        <div>
+          <p class="lema">Comercializadora Sipan S.A.C. / Chiclayo</p>
+          <h1 id="titulo_vista">Inventario</h1>
+        </div>
+        <div class="zona-usuario">
+          <div>
+            <p class="nombre" id="usuario_activo"></p>
+            <p class="rol" id="rol_activo"></p>
+          </div>
+        </div>
+      </header>
+
+      <!-- Vista de inventario -->
+      <section id="vista_inventario" class="vista">
+
+        <div class="resumen" aria-label="Resumen del inventario">
+          <div class="resumen-dato">
+            <p class="cifra" id="dato_total">0</p>
+            <span class="rotulo">Productos activos</span>
+          </div>
+          <div class="resumen-dato">
+            <p class="cifra" id="dato_valor">S/ 0.00</p>
+            <span class="rotulo">Valor del inventario</span>
+          </div>
+          <div class="resumen-dato">
+            <p class="cifra cifra-alerta" id="dato_bajos">0</p>
+            <span class="rotulo">Bajo el minimo</span>
+          </div>
+          <div class="resumen-dato">
+            <p class="cifra" id="dato_categorias">0</p>
+            <span class="rotulo">Categorias</span>
+          </div>
+        </div>
+
+        <div id="franja_alerta" class="franja-alerta" hidden>
+          <img src="img/alerta.svg" alt="" width="18" height="18">
+          <span id="texto_alerta"></span>
+        </div>
+
+        <div class="herramientas">
+          <input class="campo-entrada" type="search" id="buscador"
+                 placeholder="Buscar por nombre o codigo" aria-label="Buscar producto">
+          <select class="campo-select" id="filtro_categoria" aria-label="Filtrar por categoria">
+            <option value="">Todas las categorias</option>
+          </select>
+          <select class="campo-select" id="filtro_estado" aria-label="Filtrar por estado">
+            <option value="">Todo el stock</option>
+            <option value="bajo">Bajo el minimo</option>
+            <option value="normal">Stock normal</option>
+            <option value="papelera" id="opcion_papelera" hidden>Papelera</option>
+          </select>
+          <span class="separador"></span>
+          <button id="boton_categoria" class="boton boton-borde" type="button" hidden>Nueva categoria</button>
+          <button id="boton_exportar" class="boton boton-borde" type="button">Descargar CSV</button>
+          <button id="boton_nuevo" class="boton boton-auto" type="button">Nuevo producto</button>
+        </div>
+
+        <div class="tabla-envoltura">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col"><button class="orden" data-orden="codigo" type="button">Codigo</button></th>
+                <th scope="col"><button class="orden" data-orden="nombre" type="button">Producto</button></th>
+                <th scope="col">Categoria</th>
+                <th scope="col"><button class="orden" data-orden="precio" type="button">Precio unit.</button></th>
+                <th scope="col"><button class="orden" data-orden="stock" type="button">Stock</button></th>
+                <th scope="col">Nivel</th>
+                <th scope="col">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="cuerpo_tabla"></tbody>
+          </table>
+        </div>
+
+        <div class="paginacion">
+          <span class="conteo" id="conteo_resultados"></span>
+          <span class="separador"></span>
+          <button id="pagina_atras" class="boton-mini" type="button">Anterior</button>
+          <span class="conteo" id="pagina_actual"></span>
+          <button id="pagina_adelante" class="boton-mini" type="button">Siguiente</button>
+        </div>
+      </section>
+
+      <!-- Vista de movimientos -->
+      <section id="vista_movimientos" class="vista" hidden>
+        <div class="dos-columnas">
+
+          <form id="form_movimiento" class="tarjeta" novalidate>
+            <h2 class="tarjeta-titulo">Registrar movimiento</h2>
+            <div id="aviso_movimiento" class="aviso aviso-error" hidden></div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="m_producto">Producto</label>
+              <select class="campo-select" id="m_producto" name="producto_id" required></select>
+            </div>
+
+            <div class="campo">
+              <span class="campo-etiqueta">Tipo de movimiento</span>
+              <div class="opciones-tipo">
+                <label class="opcion-tipo">
+                  <input type="radio" name="tipo" value="entrada" checked>
+                  <span>Entrada</span>
+                </label>
+                <label class="opcion-tipo opcion-tipo-salida">
+                  <input type="radio" name="tipo" value="salida">
+                  <span>Salida</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="m_cantidad">Cantidad</label>
+              <input class="campo-entrada" type="number" id="m_cantidad" name="cantidad" step="1" min="1" required>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="m_motivo">Motivo</label>
+              <input class="campo-entrada" type="text" id="m_motivo" name="motivo"
+                     maxlength="120" placeholder="Compra a proveedor, venta, merma..." required>
+            </div>
+
+            <button class="boton" type="submit">Registrar movimiento</button>
+          </form>
+
+          <div>
+            <h2 class="tarjeta-titulo">Historial (kardex)</h2>
+            <div class="tabla-envoltura">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Producto</th>
+                    <th scope="col">Tipo</th>
+                    <th scope="col">Cantidad</th>
+                    <th scope="col">Motivo</th>
+                    <th scope="col">Usuario</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla_movimientos"></tbody>
+              </table>
+            </div>
+            <div class="paginacion">
+              <span class="separador"></span>
+              <button id="mov_atras" class="boton-mini" type="button">Anterior</button>
+              <span class="conteo" id="mov_actual"></span>
+              <button id="mov_adelante" class="boton-mini" type="button">Siguiente</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Vista de venta mayorista -->
+      <section id="vista_ventas" class="vista" hidden>
+        <div class="dos-columnas dos-columnas-venta">
+
+          <form id="form_venta" class="tarjeta" novalidate>
+            <h2 class="tarjeta-titulo">Nueva boleta mayorista</h2>
+            <div id="aviso_venta" class="aviso aviso-error" hidden></div>
+
+            <div class="modal-doble">
+              <div class="campo">
+                <label class="campo-etiqueta" for="v_cliente">Cliente / Razon social</label>
+                <input class="campo-entrada" type="text" id="v_cliente" name="cliente" maxlength="80" required>
+              </div>
+              <div class="campo">
+                <label class="campo-etiqueta" for="v_documento">RUC o DNI <span class="opcional">(opcional)</span></label>
+                <input class="campo-entrada" type="text" id="v_documento" name="documento" maxlength="20">
+              </div>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="v_direccion">Direccion <span class="opcional">(opcional)</span></label>
+              <input class="campo-entrada" type="text" id="v_direccion" name="direccion" maxlength="120">
+            </div>
+
+            <span class="campo-etiqueta">Productos de la boleta</span>
+            <div class="renglon-agregar">
+              <select class="campo-select" id="v_producto" aria-label="Producto a agregar"></select>
+              <input class="campo-entrada campo-cantidad" type="number" id="v_cantidad" min="1" step="1" placeholder="Cant." aria-label="Cantidad">
+              <button type="button" class="boton boton-auto" id="v_agregar">Agregar</button>
+            </div>
+
+            <div class="tabla-envoltura tabla-venta">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Producto</th>
+                    <th scope="col">Cant.</th>
+                    <th scope="col">P. unit.</th>
+                    <th scope="col">Importe</th>
+                    <th scope="col"></th>
+                  </tr>
+                </thead>
+                <tbody id="v_lineas">
+                  <tr class="linea-vacia"><td colspan="5">Agregue productos a la boleta.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="descuento-fila">
+              <label class="opcion-check">
+                <input type="checkbox" id="v_usar_descuento">
+                <span>Aplicar descuento</span>
+              </label>
+              <div class="campo-descuento" id="caja_descuento" hidden>
+                <input class="campo-entrada campo-cantidad" type="number" id="v_descuento" min="0" max="100" step="0.5" value="0">
+                <span class="sufijo-pct">% sobre el subtotal</span>
+              </div>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="v_observacion">Observacion <span class="opcional">(opcional)</span></label>
+              <input class="campo-entrada" type="text" id="v_observacion" name="observacion" maxlength="200"
+                     placeholder="Condiciones de pago, entrega, etc.">
+            </div>
+
+            <div class="totales-caja">
+              <div class="total-linea"><span>Subtotal</span><span id="v_subtotal">S/ 0.00</span></div>
+              <div class="total-linea total-descuento" id="linea_descuento" hidden>
+                <span>Descuento (<span id="v_pct_texto">0</span>%)</span><span id="v_monto_descuento">- S/ 0.00</span>
+              </div>
+              <div class="total-linea total-final"><span>Total a pagar</span><span id="v_total">S/ 0.00</span></div>
+            </div>
+
+            <button class="boton" type="submit" id="v_emitir">Emitir boleta</button>
+          </form>
+
+          <div>
+            <h2 class="tarjeta-titulo">Boletas recientes</h2>
+            <div class="tabla-envoltura">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Numero</th>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Cliente</th>
+                    <th scope="col">Total</th>
+                    <th scope="col">Accion</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla_boletas"></tbody>
+              </table>
+            </div>
+            <div class="paginacion">
+              <span class="separador"></span>
+              <button id="bol_atras" class="boton-mini" type="button">Anterior</button>
+              <span class="conteo" id="bol_actual"></span>
+              <button id="bol_adelante" class="boton-mini" type="button">Siguiente</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Vista de tickets -->
+      <section id="vista_tickets" class="vista" hidden>
+        <div class="dos-columnas">
+
+          <form id="form_ticket" class="tarjeta" novalidate>
+            <h2 class="tarjeta-titulo">Nuevo ticket</h2>
+            <div id="aviso_ticket" class="aviso aviso-error" hidden></div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="t_producto">Producto relacionado</label>
+              <select class="campo-select" id="t_producto" name="producto_id">
+                <option value="">Sin producto especifico</option>
+              </select>
+            </div>
+
+            <div class="modal-doble">
+              <div class="campo">
+                <label class="campo-etiqueta" for="t_tipo">Tipo</label>
+                <select class="campo-select" id="t_tipo" name="tipo" required>
+                  <option value="nota">Nota</option>
+                  <option value="venta">Venta</option>
+                  <option value="reposicion">Reposicion</option>
+                  <option value="incidencia">Incidencia</option>
+                </select>
+              </div>
+              <div class="campo">
+                <label class="campo-etiqueta" for="t_prioridad">Prioridad</label>
+                <select class="campo-select" id="t_prioridad" name="prioridad" required>
+                  <option value="media">Media</option>
+                  <option value="alta">Alta</option>
+                  <option value="baja">Baja</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="campo" id="campo_t_cantidad" hidden>
+              <label class="campo-etiqueta" for="t_cantidad">Cantidad vendida</label>
+              <input class="campo-entrada" type="number" id="t_cantidad" name="cantidad" step="1" min="1">
+              <span class="minimo">Al guardar, esta cantidad se descuenta del stock automaticamente.</span>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="t_titulo">Titulo</label>
+              <input class="campo-entrada" type="text" id="t_titulo" name="titulo" maxlength="80" required>
+            </div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="t_detalle">Detalle</label>
+              <textarea class="campo-entrada" id="t_detalle" name="detalle" maxlength="300" rows="4" required></textarea>
+            </div>
+
+            <button class="boton" type="submit">Guardar ticket</button>
+          </form>
+
+          <div>
+            <div class="herramientas herramientas-compactas">
+              <select class="campo-select" id="ticket_estado" aria-label="Filtrar tickets por estado">
+                <option value="abierto">Tickets abiertos</option>
+                <option value="cerrado">Tickets cerrados</option>
+              </select>
+            </div>
+            <div class="tabla-envoltura">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Fecha</th>
+                    <th scope="col">Tipo</th>
+                    <th scope="col">Ticket</th>
+                    <th scope="col">Producto</th>
+                    <th scope="col">Prioridad</th>
+                    <th scope="col">Accion</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla_tickets"></tbody>
+              </table>
+            </div>
+            <div class="paginacion">
+              <span class="separador"></span>
+              <button id="ticket_atras" class="boton-mini" type="button">Anterior</button>
+              <span class="conteo" id="ticket_actual"></span>
+              <button id="ticket_adelante" class="boton-mini" type="button">Siguiente</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Vista de reportes -->
+      <section id="vista_reportes" class="vista" hidden>
+        <div class="rejilla-reportes">
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Valor por categoria</h2>
+            <div id="grafico_categorias" class="grafico"></div>
+          </div>
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Movimientos de los ultimos 7 dias</h2>
+            <div id="grafico_dias" class="grafico"></div>
+            <div class="leyenda">
+              <span class="leyenda-item leyenda-entrada">Entradas</span>
+              <span class="leyenda-item leyenda-salida">Salidas</span>
+            </div>
+          </div>
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Productos con mas movimiento</h2>
+            <ol id="lista_movidos" class="lista-ranking"></ol>
+          </div>
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Stock critico</h2>
+            <ul id="lista_criticos" class="lista-criticos"></ul>
+          </div>
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Tipos de productos</h2>
+            <div id="tabla_tipos_producto" class="tabla-mini"></div>
+          </div>
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Tickets y notas</h2>
+            <div id="tabla_resumen_tickets" class="tabla-mini"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Vista de usuarios (solo gerencia) -->
+      <section id="vista_usuarios" class="vista" hidden>
+        <div class="dos-columnas">
+          <form id="form_usuario" class="tarjeta" novalidate>
+            <h2 class="tarjeta-titulo">Crear usuario</h2>
+            <div id="aviso_usuario" class="aviso aviso-error" hidden></div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="u_nombre">Nombre completo</label>
+              <input class="campo-entrada" type="text" id="u_nombre" name="nombre" maxlength="60" required>
+            </div>
+            <div class="campo">
+              <label class="campo-etiqueta" for="u_usuario">Usuario</label>
+              <input class="campo-entrada" type="text" id="u_usuario" name="usuario" maxlength="20" required>
+            </div>
+            <div class="campo">
+              <label class="campo-etiqueta" for="u_correo">Correo</label>
+              <input class="campo-entrada" type="email" id="u_correo" name="correo" maxlength="80" required>
+            </div>
+            <div class="campo">
+              <label class="campo-etiqueta" for="u_rol">Rol</label>
+              <select class="campo-select" id="u_rol" name="rol" required></select>
+            </div>
+            <div class="modal-doble">
+              <div class="campo">
+                <label class="campo-etiqueta" for="u_clave">Clave</label>
+                <input class="campo-entrada" type="password" id="u_clave" name="clave" maxlength="72" required>
+              </div>
+              <div class="campo">
+                <label class="campo-etiqueta" for="u_confirmacion">Repetir clave</label>
+                <input class="campo-entrada" type="password" id="u_confirmacion" name="confirmacion" maxlength="72" required>
+              </div>
+            </div>
+
+            <button class="boton" type="submit">Crear usuario</button>
+          </form>
+
+          <div>
+            <h2 class="tarjeta-titulo">Usuarios registrados</h2>
+            <div class="tabla-envoltura">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Nombre</th>
+                    <th scope="col">Usuario</th>
+                    <th scope="col">Correo</th>
+                    <th scope="col">Rol</th>
+                    <th scope="col">Creado</th>
+                    <th scope="col">Accion</th>
+                  </tr>
+                </thead>
+                <tbody id="tabla_usuarios"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Vista de auditoria (solo gerencia) -->
+      <section id="vista_auditoria" class="vista" hidden>
+        <div class="tabla-envoltura">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Fecha</th>
+                <th scope="col">Usuario</th>
+                <th scope="col">Evento</th>
+                <th scope="col">Detalle</th>
+              </tr>
+            </thead>
+            <tbody id="tabla_auditoria"></tbody>
+          </table>
+        </div>
+        <div class="paginacion">
+          <span class="separador"></span>
+          <button id="aud_atras" class="boton-mini" type="button">Anterior</button>
+          <span class="conteo" id="aud_actual"></span>
+          <button id="aud_adelante" class="boton-mini" type="button">Siguiente</button>
+        </div>
+      </section>
+
+      <!-- Vista de mi perfil -->
+      <section id="vista_perfil" class="vista" hidden>
+        <div class="dos-columnas">
+          <div class="tarjeta">
+            <h2 class="tarjeta-titulo">Datos de la cuenta</h2>
+            <dl class="ficha-perfil" id="ficha_perfil"></dl>
+            <div class="rol-descripcion" id="rol_descripcion"></div>
+          </div>
+
+          <form id="form_clave" class="tarjeta" novalidate>
+            <h2 class="tarjeta-titulo">Cambiar clave</h2>
+            <div id="aviso_clave" class="aviso aviso-error" hidden></div>
+
+            <div class="campo">
+              <label class="campo-etiqueta" for="c_actual">Clave actual</label>
+              <input class="campo-entrada" type="password" id="c_actual" name="actual"
+                     autocomplete="current-password" required>
+            </div>
+            <div class="campo">
+              <label class="campo-etiqueta" for="c_nueva">Clave nueva</label>
+              <input class="campo-entrada" type="password" id="c_nueva" name="nueva"
+                     autocomplete="new-password" required>
+            </div>
+            <div class="campo">
+              <label class="campo-etiqueta" for="c_confirmacion">Repetir clave nueva</label>
+              <input class="campo-entrada" type="password" id="c_confirmacion" name="confirmacion"
+                     autocomplete="new-password" required>
+            </div>
+
+            <button class="boton" type="submit">Actualizar clave</button>
+            <p class="nota">Al cambiar la clave se cierran las sesiones abiertas en otros equipos.</p>
+          </form>
+        </div>
+
+        <!-- Mi verificacion en dos pasos -->
+        <div class="tarjeta tarjeta-2fa">
+          <div class="cabecera-2fa">
+            <div>
+              <h2 class="tarjeta-titulo">Verificacion en dos pasos</h2>
+              <p class="nota" id="estado_2fa_texto">Consultando estado...</p>
+            </div>
+            <span class="sello-2fa" id="sello_2fa"></span>
+          </div>
+
+          <div id="aviso_perfil_2fa" class="aviso aviso-error" hidden></div>
+
+          <!-- 2FA apagado: boton para activar -->
+          <div id="bloque_2fa_off" hidden>
+            <p class="texto-2fa">Anada una capa extra de seguridad. Al iniciar sesion, ademas de su clave se pedira un codigo temporal de una app como Google Authenticator, Authy o Microsoft Authenticator.</p>
+            <button class="boton boton-auto" type="button" id="boton_activar_2fa">Activar verificacion</button>
+          </div>
+
+          <!-- Activacion: QR y codigo -->
+          <div id="bloque_2fa_config" hidden>
+            <ol class="pasos-2fa">
+              <li>Instale una app de autenticacion en su telefono.</li>
+              <li>Escanee este codigo QR (o ingrese la clave manual).</li>
+              <li>Escriba el codigo de 6 digitos que aparece en la app.</li>
+            </ol>
+            <div class="qr-fila">
+              <div id="qr_2fa" class="qr-caja"></div>
+              <div class="qr-manual">
+                <span class="campo-etiqueta">Clave manual</span>
+                <code id="secreto_2fa" class="secreto-manual"></code>
+                <div class="campo">
+                  <label class="campo-etiqueta" for="codigo_activar">Codigo de la app</label>
+                  <input class="campo-entrada campo-codigo" type="text" id="codigo_activar"
+                         inputmode="numeric" maxlength="6" placeholder="000000">
+                </div>
+                <div id="aviso_activar_2fa" class="aviso aviso-error" hidden></div>
+                <div class="botones-2fa">
+                  <button class="boton boton-auto" type="button" id="boton_confirmar_2fa">Confirmar y activar</button>
+                  <button class="boton boton-borde" type="button" id="boton_cancelar_2fa">Cancelar</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2FA activado -->
+          <div id="bloque_2fa_on" hidden>
+            <p class="texto-2fa texto-2fa-ok">Su cuenta esta protegida. <span id="respaldos_texto"></span></p>
+            <div id="zona_desactivar_2fa">
+              <p class="nota" id="nota_obligatorio_2fa" hidden>Como gerente general, la verificacion en dos pasos es obligatoria y no puede desactivarse.</p>
+              <button class="boton boton-borde boton-rojo" type="button" id="boton_desactivar_2fa">Desactivar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- Ventana para crear o editar un producto -->
+  <dialog id="modal_producto">
+    <div class="modal-cabecera">
+      <h3 id="titulo_modal">Nuevo producto</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_producto" aria-label="Cerrar">&times;</button>
+    </div>
+    <form id="form_producto" method="dialog" novalidate>
+      <div class="modal-cuerpo">
+        <div id="aviso_producto" class="aviso aviso-error" hidden></div>
+
+        <div class="campo">
+          <label class="campo-etiqueta" for="p_nombre">Nombre del producto</label>
+          <input class="campo-entrada" type="text" id="p_nombre" name="nombre" maxlength="100" required>
+        </div>
+
+        <div class="campo">
+          <label class="campo-etiqueta" for="p_categoria">Categoria</label>
+          <select class="campo-select" id="p_categoria" name="categoria_id" required></select>
+        </div>
+
+        <div class="modal-doble">
+          <div class="campo">
+            <label class="campo-etiqueta" for="p_precio">Precio unitario S/</label>
+            <input class="campo-entrada" type="number" id="p_precio" name="precio" step="0.01" min="0.01" required>
+          </div>
+          <div class="campo">
+            <label class="campo-etiqueta" for="p_stock">Stock actual</label>
+            <input class="campo-entrada" type="number" id="p_stock" name="stock" step="1" min="0" required>
+          </div>
+        </div>
+
+        <div class="campo">
+          <label class="campo-etiqueta" for="p_minimo">Stock minimo para alerta</label>
+          <input class="campo-entrada" type="number" id="p_minimo" name="minimo" step="1" min="0" value="10" required>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="boton boton-auto" type="submit">Guardar producto</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ventana para confirmar que elimino -->
+  <dialog id="modal_eliminar">
+    <div class="modal-cabecera">
+      <h3>Confirmar eliminacion</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_eliminar" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-cuerpo">
+      <p class="texto-peligro">El producto ira a la papelera y podra restaurarse.</p>
+      <dl class="resumen-eliminar" id="resumen_eliminar"></dl>
+    </div>
+    <div class="modal-pie">
+      <button class="boton boton-borde" type="button" data-cerrar="modal_eliminar">Cancelar</button>
+      <button id="boton_confirmar_eliminar" class="boton boton-rojo boton-auto" type="button">Si, eliminar</button>
+    </div>
+  </dialog>
+
+  <!-- Ventana para cambiar el rol -->
+  <dialog id="modal_rol">
+    <div class="modal-cabecera">
+      <h3>Cambiar rol</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_rol" aria-label="Cerrar">&times;</button>
+    </div>
+    <form id="form_rol" method="dialog" novalidate>
+      <div class="modal-cuerpo">
+        <div id="aviso_rol" class="aviso aviso-error" hidden></div>
+        <p id="resumen_rol" class="texto-peligro"></p>
+
+        <div class="campo">
+          <label class="campo-etiqueta" for="r_rol">Nuevo rol</label>
+          <select class="campo-select" id="r_rol" name="rol" required></select>
+        </div>
+        <div class="campo">
+          <label class="campo-etiqueta" for="r_clave">Su clave, para confirmar el cambio</label>
+          <input class="campo-entrada" type="password" id="r_clave" name="clave" maxlength="72" required>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="boton boton-auto" type="submit">Confirmar cambio</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ventana para una nueva categoria -->
+  <dialog id="modal_categoria">
+    <div class="modal-cabecera">
+      <h3>Nueva categoria</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_categoria" aria-label="Cerrar">&times;</button>
+    </div>
+    <form id="form_categoria" method="dialog" novalidate>
+      <div class="modal-cuerpo">
+        <div id="aviso_categoria" class="aviso aviso-error" hidden></div>
+        <div class="campo">
+          <label class="campo-etiqueta" for="cat_nombre">Nombre de la categoria</label>
+          <input class="campo-entrada" type="text" id="cat_nombre" name="nombre" maxlength="30" required>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="boton boton-auto" type="submit">Crear categoria</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ventana con los codigos de respaldo -->
+  <dialog id="modal_respaldos">
+    <div class="modal-cabecera">
+      <h3>Codigos de respaldo</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_respaldos" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-cuerpo">
+      <p class="texto-2fa">Guarde estos codigos en un lugar seguro. Cada uno sirve <strong>una sola vez</strong> para entrar si pierde acceso a su telefono. No se volveran a mostrar.</p>
+      <ul class="lista-respaldos" id="lista_respaldos"></ul>
+    </div>
+    <div class="modal-pie">
+      <button class="boton boton-borde" type="button" id="copiar_respaldos">Copiar codigos</button>
+      <button class="boton boton-auto" type="button" data-cerrar="modal_respaldos">Ya los guarde</button>
+    </div>
+  </dialog>
+
+  <!-- Ventana para apagar el 2FA -->
+  <dialog id="modal_desactivar_2fa">
+    <div class="modal-cabecera">
+      <h3>Desactivar verificacion</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_desactivar_2fa" aria-label="Cerrar">&times;</button>
+    </div>
+    <form id="form_desactivar_2fa" method="dialog" novalidate>
+      <div class="modal-cuerpo">
+        <div id="aviso_desactivar_2fa" class="aviso aviso-error" hidden></div>
+        <p class="texto-peligro">Para confirmar, ingrese su clave y un codigo actual de su app.</p>
+        <div class="campo">
+          <label class="campo-etiqueta" for="d_clave">Su clave</label>
+          <input class="campo-entrada" type="password" id="d_clave" name="clave" maxlength="72" required>
+        </div>
+        <div class="campo">
+          <label class="campo-etiqueta" for="d_codigo">Codigo de la app</label>
+          <input class="campo-entrada campo-codigo" type="text" id="d_codigo" name="codigo"
+                 inputmode="numeric" maxlength="6" placeholder="000000" required>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="boton boton-rojo boton-auto" type="submit">Desactivar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Ventana de la boleta para imprimir -->
+  <dialog id="modal_boleta">
+    <div class="modal-cabecera modal-cabecera-boleta no-imprimir">
+      <h3>Boleta emitida</h3>
+      <button class="modal-cerrar" type="button" data-cerrar="modal_boleta" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-cuerpo">
+      <div id="boleta_papel" class="boleta-papel"></div>
+    </div>
+    <div class="modal-pie no-imprimir">
+      <button class="boton boton-borde" type="button" data-cerrar="modal_boleta">Cerrar</button>
+      <button class="boton boton-auto" type="button" id="boton_imprimir_boleta">Imprimir</button>
+    </div>
+  </dialog>
+
+  <script src="js/validacion.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/qrcode.js"></script>
+  <script src="js/qr.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

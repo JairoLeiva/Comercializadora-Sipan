@@ -1,0 +1,14 @@
+{
+  "name": "sipan-inventario",
+  "version": "2.0.0",
+  "description": "Sistema web de gestion de inventario con base de datos SQLite para Comercializadora Sipan S.A.C.",
+  "main": "servidor.js",
+  "scripts": {
+    "start": "node servidor.js",
+    "test": "node pruebas/pruebas_api.mjs"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "license": "MIT"
+}

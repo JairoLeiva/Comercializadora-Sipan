@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de gestion de inventario de Comercializadora Sipan">
+  <title>Ingresar | SIPAN Inventario</title>
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/estilos.css">
+  <!-- Cargo el reCAPTCHA de Google; se activa cuando pongo mi clave en js/captcha.js -->
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</head>
+<body>
+
+  <main class="acceso">
+
+    <section class="acceso-banda">
+      <div class="acceso-marca">
+        <img src="img/logo.svg" alt="Logo SIPAN" width="40" height="40">
+        <span>Comercializadora Sipan S.A.C.</span>
+      </div>
+
+      <div class="acceso-titulo">
+        <h1>Cada<br>producto,<br><em>contado.</em></h1>
+        <p>Control de inventario en tiempo real para la distribucion mayorista de Chiclayo y Lambayeque.</p>
+      </div>
+
+      <p class="acceso-pie">Sistema interno v1.0 / Acceso restringido</p>
+    </section>
+
+    <section class="acceso-cuerpo">
+      <div class="tarjeta-acceso">
+        <h2>Iniciar sesion</h2>
+        <p class="subtitulo">Ingrese con su usuario o correo registrado.</p>
+
+        <div id="aviso_login" class="aviso" hidden></div>
+
+        <form id="form_login" novalidate>
+
+          <!-- Campo trampa oculto para cazar robots -->
+          <div class="campo-trampa" aria-hidden="true">
+            <label for="empresa_web">No llenar este campo</label>
+            <input type="text" id="empresa_web" name="empresa_web" tabindex="-1" autocomplete="off">
+          </div>
+
+          <div class="campo">
+            <label class="campo-etiqueta" for="usuario">Usuario o correo</label>
+            <input class="campo-entrada" type="text" id="usuario" name="usuario"
+                   autocomplete="username" maxlength="80" required>
+          </div>
+
+          <div class="campo">
+            <label class="campo-etiqueta" for="clave">Clave</label>
+            <input class="campo-entrada" type="password" id="clave" name="clave"
+                   autocomplete="current-password" maxlength="72" required>
+          </div>
+
+          <div id="captcha_login" class="caja-captcha"></div>
+
+          <button class="boton" type="submit">Entrar al sistema</button>
+        </form>
+
+        <!-- Paso del codigo 2FA -->
+        <form id="form_2fa" novalidate hidden>
+          <div id="aviso_2fa" class="aviso aviso-error" hidden></div>
+          <p class="subtitulo" id="texto_2fa">Ingrese el codigo de 6 digitos de su app de autenticacion.</p>
+
+          <div class="campo">
+            <label class="campo-etiqueta" for="codigo_2fa">Codigo de verificacion</label>
+            <input class="campo-entrada campo-codigo" type="text" id="codigo_2fa" name="codigo"
+                   inputmode="numeric" autocomplete="one-time-code" maxlength="9"
+                   placeholder="000000" autofocus>
+            <span class="minimo">Tambien puede usar uno de sus codigos de respaldo.</span>
+          </div>
+
+          <button class="boton" type="submit">Verificar y entrar</button>
+          <button class="boton boton-borde" type="button" id="cancelar_2fa">Volver</button>
+        </form>
+
+        <p class="enlace-acceso">
+          Las cuentas nuevas las crea gerencia desde el panel.
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="js/ui.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/validacion.js"></script>
+  
+  <script src="js/captcha.js"></script>
+  <script src="js/auth.js"></script>
+</body>
+</html>
