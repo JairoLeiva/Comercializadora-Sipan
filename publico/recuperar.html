@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Recuperar acceso al sistema de inventario Sipan">
+  <title>Recuperar acceso | SIPAN Inventario</title>
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/estilos.css">
+  <!-- Cargo el reCAPTCHA de Google, con render explicito para que no falle al cargar -->
+  <script src="https://www.google.com/recaptcha/api.js?onload=grecaptchaListo&render=explicit" defer></script>
+</head>
+<body>
+
+  <main class="acceso">
+
+    <section class="acceso-banda">
+      <div class="acceso-marca">
+        <img src="img/logo.svg" alt="Logo SIPAN" width="40" height="40">
+        <span>Comercializadora Sipan S.A.C.</span>
+      </div>
+
+      <div class="acceso-titulo">
+        <h1>Recupere<br>el acceso<br><em>a su cuenta.</em></h1>
+        <p>Le enviaremos un enlace a su correo registrado para elegir una clave nueva.</p>
+      </div>
+
+      <p class="acceso-pie">Sistema interno v1.0 / Acceso restringido</p>
+    </section>
+
+    <section class="acceso-cuerpo">
+      <div class="tarjeta-acceso">
+        <h2>Recuperar clave</h2>
+        <p class="subtitulo">Escriba su usuario o correo registrado.</p>
+
+        <div id="aviso_recuperar" class="aviso" hidden></div>
+
+        <form id="form_recuperar" novalidate>
+
+          <!-- Campo trampa oculto para cazar robots -->
+          <div class="campo-trampa" aria-hidden="true">
+            <label for="empresa_web">No llenar este campo</label>
+            <input type="text" id="empresa_web" name="empresa_web" tabindex="-1" autocomplete="off">
+          </div>
+
+          <div class="campo">
+            <label class="campo-etiqueta" for="identidad">Usuario o correo</label>
+            <input class="campo-entrada" type="text" id="identidad" name="identidad"
+                   autocomplete="username" maxlength="80" required>
+          </div>
+
+          <div id="captcha_recuperar" class="caja-captcha"></div>
+
+          <button class="boton" type="submit">Enviar enlace de recuperacion</button>
+        </form>
+
+        <p class="enlace-acceso">
+          <a href="index.html">Volver a iniciar sesion</a>
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="js/ui.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/validacion.js"></script>
+  <script src="js/captcha.js"></script>
+  <script src="js/recuperar.js"></script>
+</body>
+</html>

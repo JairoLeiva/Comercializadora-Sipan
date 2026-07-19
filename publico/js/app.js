@@ -273,6 +273,7 @@
       formProducto.precio.value = producto.precio;
       formProducto.stock.value = producto.stock;
       formProducto.minimo.value = producto.minimo;
+      formProducto.codigo_barras.value = producto.codigo_barras || "";
     } else {
       formProducto.minimo.value = 10;
     }
@@ -283,6 +284,10 @@
 
   document.getElementById("boton_nuevo").addEventListener("click", () => abrirModalProducto(null));
 
+  document.getElementById("p_escanear").addEventListener("click", () => {
+    Escaner.abrirCamara(codigo => { formProducto.codigo_barras.value = codigo; });
+  });
+
   formProducto.addEventListener("submit", async evento => {
     evento.preventDefault();
 
@@ -291,7 +296,8 @@
       categoria_id: formProducto.categoria_id.value,
       precio: formProducto.precio.value,
       stock: formProducto.stock.value,
-      minimo: formProducto.minimo.value
+      minimo: formProducto.minimo.value,
+      codigo_barras: formProducto.codigo_barras.value
     };
 
     const errores = Validacion.producto(datos);
@@ -364,8 +370,34 @@
     await cargarTablaMovimientos();
   }
 
+  /* Al escanear busco el producto por su codigo de barras y lo selecciono */
+  async function seleccionarPorCodigoBarras(codigo, selector) {
+    try {
+      const producto = await Api.get("/api/productos/codigo/" + encodeURIComponent(codigo));
+      selector.value = producto.id;
+      UI.toast("Producto encontrado: " + producto.nombre);
+    } catch (error) {
+      UI.toast(error.errores[0], "error");
+    }
+  }
+
+  Escaner.usb(document.getElementById("m_escaner"),
+    codigo => seleccionarPorCodigoBarras(codigo, document.getElementById("m_producto")));
+  document.getElementById("m_escaner_camara").addEventListener("click", () => {
+    Escaner.abrirCamara(codigo => seleccionarPorCodigoBarras(codigo, document.getElementById("m_producto")));
+  });
+
+  function rangoMovimientos() {
+    const desde = document.getElementById("mov_desde").value;
+    const hasta = document.getElementById("mov_hasta").value;
+    let parametros = "";
+    if (desde) parametros += "&desde=" + encodeURIComponent(desde);
+    if (hasta) parametros += "&hasta=" + encodeURIComponent(hasta);
+    return parametros;
+  }
+
   async function cargarTablaMovimientos() {
-    const datos = await Api.get("/api/movimientos?pagina=" + paginaMov);
+    const datos = await Api.get("/api/movimientos?pagina=" + paginaMov + rangoMovimientos());
     paginasMov = datos.paginas;
 
     document.getElementById("mov_actual").textContent = "Pagina " + datos.pagina + " de " + datos.paginas;
@@ -393,6 +425,16 @@
   });
   document.getElementById("mov_adelante").addEventListener("click", () => {
     if (paginaMov < paginasMov) { paginaMov++; cargarTablaMovimientos(); }
+  });
+  document.getElementById("mov_filtrar").addEventListener("click", () => {
+    paginaMov = 1;
+    cargarTablaMovimientos();
+  });
+  document.getElementById("mov_limpiar").addEventListener("click", () => {
+    document.getElementById("mov_desde").value = "";
+    document.getElementById("mov_hasta").value = "";
+    paginaMov = 1;
+    cargarTablaMovimientos();
   });
 
   document.getElementById("form_movimiento").addEventListener("submit", async evento => {
@@ -515,6 +557,24 @@
     document.getElementById("v_total").textContent = UI.moneda(total);
   }
 
+  /* Al escanear agrego 1 unidad, si el producto ya estaba solo le sumo una mas */
+  async function agregarPorCodigoBarras(codigo) {
+    try {
+      const producto = await Api.get("/api/productos/codigo/" + encodeURIComponent(codigo));
+      document.getElementById("v_producto").value = producto.id;
+      const campoCantidad = document.getElementById("v_cantidad");
+      if (!campoCantidad.value) campoCantidad.value = 1;
+      agregarLinea();
+    } catch (error) {
+      UI.toast(error.errores[0], "error");
+    }
+  }
+
+  Escaner.usb(document.getElementById("v_escaner"), agregarPorCodigoBarras);
+  document.getElementById("v_escaner_camara").addEventListener("click", () => {
+    Escaner.abrirCamara(agregarPorCodigoBarras);
+  });
+
   document.getElementById("v_agregar").addEventListener("click", agregarLinea);
   document.getElementById("v_cantidad").addEventListener("keydown", e => {
     if (e.key === "Enter") { e.preventDefault(); agregarLinea(); }
@@ -601,7 +661,7 @@
       const datos = await Api.get("/api/ventas/boleta/" + id);
       const b = datos.boleta;
       mostrarBoleta({
-        numero: b.numero, cliente: b.cliente, documento: b.documento || "",
+        id: b.id, numero: b.numero, cliente: b.cliente, documento: b.documento || "",
         direccion: b.direccion || "", observacion: b.observacion || "",
         subtotal: b.subtotal, descuento_pct: b.descuento_pct, descuento_monto: b.descuento_monto,
         total: b.total, vendedor: b.vendedor, creado: b.creado, items: datos.items
@@ -617,7 +677,11 @@
   });
 
   /* Armo la boleta para imprimir */
+  let boletaActualId = null;
+
   function mostrarBoleta(b) {
+    boletaActualId = b.id || null;
+    document.getElementById("boton_pdf_boleta").hidden = !boletaActualId;
     const filas = b.items.map(it =>
       "<tr>" +
       "<td>" + UI.limpiar(it.codigo) + "</td>" +
@@ -666,6 +730,10 @@
 
     document.getElementById("modal_boleta").showModal();
   }
+
+  document.getElementById("boton_pdf_boleta").addEventListener("click", () => {
+    if (boletaActualId) window.location.href = "/api/ventas/boleta/" + boletaActualId + "/pdf";
+  });
 
   document.getElementById("boton_imprimir_boleta").addEventListener("click", () => {
     document.body.classList.add("imprimiendo-boleta");
@@ -817,14 +885,40 @@
   /* Aca armo los reportes; los graficos los dibujo yo con SVG */
 
   async function cargarReportes() {
-    const datos = await Api.get("/api/reportes");
+    const desde = document.getElementById("rep_desde").value;
+    const hasta = document.getElementById("rep_hasta").value;
+    const partes = [];
+    if (desde) partes.push("desde=" + encodeURIComponent(desde));
+    if (hasta) partes.push("hasta=" + encodeURIComponent(hasta));
+
+    const datos = await Api.get("/api/reportes" + (partes.length ? "?" + partes.join("&") : ""));
     pintarBarras(datos.porCategoria);
     pintarLineas(datos.dias);
     pintarRanking(datos.masMovidos);
     pintarCriticos(datos.criticos);
     pintarTiposProducto(datos.tiposProducto);
     pintarResumenTickets(datos.tickets);
+
+    document.getElementById("titulo_grafico_dias").textContent =
+      datos.rango && datos.rango.desde && datos.rango.hasta
+        ? "Movimientos del " + datos.rango.desde + " al " + datos.rango.hasta
+        : "Movimientos de los ultimos 7 dias";
   }
+
+  document.getElementById("rep_filtrar").addEventListener("click", cargarReportes);
+  document.getElementById("rep_limpiar").addEventListener("click", () => {
+    document.getElementById("rep_desde").value = "";
+    document.getElementById("rep_hasta").value = "";
+    cargarReportes();
+  });
+  document.getElementById("rep_pdf").addEventListener("click", () => {
+    const desde = document.getElementById("rep_desde").value;
+    const hasta = document.getElementById("rep_hasta").value;
+    const partes = [];
+    if (desde) partes.push("desde=" + encodeURIComponent(desde));
+    if (hasta) partes.push("hasta=" + encodeURIComponent(hasta));
+    window.location.href = "/api/reportes/pdf" + (partes.length ? "?" + partes.join("&") : "");
+  });
 
   function pintarBarras(categorias) {
     const mayor = Math.max(...categorias.map(c => c.valor), 1);
@@ -1005,11 +1099,55 @@
     }
   });
 
+  /* Aca armo el bloque de respaldos de la base de datos */
+
+  function tamanoLegible(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  async function cargarRespaldos() {
+    const datos = await Api.get("/api/respaldos");
+    document.getElementById("resp_info").textContent =
+      "Se crea uno automatico cada " + datos.horas + " horas y se conservan los ultimos " + datos.maximo + ".";
+
+    const cuerpo = document.getElementById("tabla_respaldos");
+    if (datos.archivos.length === 0) {
+      cuerpo.innerHTML = '<tr><td colspan="4"><div class="tabla-vacia"><p>Aun no hay respaldos.</p></div></td></tr>';
+      return;
+    }
+    cuerpo.innerHTML = datos.archivos.map(a =>
+      "<tr>" +
+      '<td class="celda-codigo">' + UI.limpiar(a.nombre) + "</td>" +
+      "<td>" + UI.fecha(a.creado) + "</td>" +
+      '<td class="celda-num">' + tamanoLegible(a.tamano) + "</td>" +
+      '<td class="celda-acciones"><a class="boton-mini" href="/api/respaldos/' +
+      encodeURIComponent(a.nombre) + '">Descargar</a></td></tr>').join("");
+  }
+
+  document.getElementById("resp_crear").addEventListener("click", async () => {
+    const boton = document.getElementById("resp_crear");
+    boton.disabled = true;
+    boton.textContent = "Creando...";
+    try {
+      const respuesta = await Api.post("/api/respaldos");
+      UI.toast(respuesta.mensaje);
+      await cargarRespaldos();
+    } catch (error) {
+      UI.toast(error.errores[0], "error");
+    } finally {
+      boton.disabled = false;
+      boton.textContent = "Respaldar ahora";
+    }
+  });
+
   /* Aca armo la vista de auditoria */
 
   let paginaAud = 1, paginasAud = 1;
 
   async function cargarAuditoria() {
+    await cargarRespaldos();
     const datos = await Api.get("/api/auditoria?pagina=" + paginaAud);
     paginasAud = datos.paginas;
 

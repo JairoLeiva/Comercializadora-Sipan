@@ -1,0 +1,8 @@
+node_modules/
+datos/sipan.db
+datos/sipan.db-shm
+datos/sipan.db-wal
+.env
+*.log
+respaldos/
+*.exe

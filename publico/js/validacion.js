@@ -82,6 +82,9 @@ const Validacion = (() => {
     errores.push(...enteroEnRango(datos.stock, "El stock", 0, 1000000));
     errores.push(...enteroEnRango(datos.minimo, "El stock minimo", 0, 100000));
 
+    if (!vacio(datos.codigo_barras) && !/^[a-zA-Z0-9-]{4,64}$/.test(String(datos.codigo_barras).trim()))
+      errores.push("El codigo de barras admite letras, numeros y guion, entre 4 y 64 caracteres.");
+
     return errores;
   }
 

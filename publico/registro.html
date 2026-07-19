@@ -7,7 +7,8 @@
   <title>Crear cuenta | SIPAN Inventario</title>
   <link rel="icon" type="image/svg+xml" href="img/logo.svg">
   <link rel="stylesheet" href="css/estilos.css">
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  <!-- Cargo el reCAPTCHA de Google, con render explicito para que no falle al cargar -->
+  <script src="https://www.google.com/recaptcha/api.js?onload=grecaptchaListo&render=explicit" defer></script>
 </head>
 <body>
 

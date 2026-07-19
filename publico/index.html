@@ -7,8 +7,8 @@
   <title>Ingresar | SIPAN Inventario</title>
   <link rel="icon" type="image/svg+xml" href="img/logo.svg">
   <link rel="stylesheet" href="css/estilos.css">
-  <!-- Cargo el reCAPTCHA de Google; se activa cuando pongo mi clave en js/captcha.js -->
-  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+  <!-- Cargo el reCAPTCHA de Google, con render explicito para que no falle al cargar -->
+  <script src="https://www.google.com/recaptcha/api.js?onload=grecaptchaListo&render=explicit" defer></script>
 </head>
 <body>
 
@@ -58,6 +58,7 @@
           <div id="captcha_login" class="caja-captcha"></div>
 
           <button class="boton" type="submit">Entrar al sistema</button>
+          <p class="enlace-acceso"><a href="recuperar.html">Olvide mi clave</a></p>
         </form>
 
         <!-- Paso del codigo 2FA -->

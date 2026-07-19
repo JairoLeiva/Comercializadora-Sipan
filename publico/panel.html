@@ -7,6 +7,8 @@
   <title>Panel | SIPAN Inventario</title>
   <link rel="icon" type="image/svg+xml" href="img/logo.svg">
   <link rel="stylesheet" href="css/estilos.css">
+  <!-- Libreria para leer codigo de barras con la camara, solo se usa si abro el lector -->
+  <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js" defer></script>
 </head>
 <body>
 
@@ -134,6 +136,14 @@
             <div id="aviso_movimiento" class="aviso aviso-error" hidden></div>
 
             <div class="campo">
+              <label class="campo-etiqueta" for="m_escaner">Escanear producto <span class="opcional">(opcional)</span></label>
+              <div class="campo-escaner">
+                <input class="campo-entrada" type="text" id="m_escaner" placeholder="Escanee o escriba el codigo y presione Enter">
+                <button class="boton boton-borde" type="button" id="m_escaner_camara">Camara</button>
+              </div>
+            </div>
+
+            <div class="campo">
               <label class="campo-etiqueta" for="m_producto">Producto</label>
               <select class="campo-select" id="m_producto" name="producto_id" required></select>
             </div>
@@ -168,6 +178,14 @@
 
           <div>
             <h2 class="tarjeta-titulo">Historial (kardex)</h2>
+            <div class="herramientas herramientas-compactas">
+              <label class="campo-fecha-etiqueta" for="mov_desde">Desde</label>
+              <input class="campo-entrada campo-fecha" type="date" id="mov_desde" aria-label="Fecha desde">
+              <label class="campo-fecha-etiqueta" for="mov_hasta">Hasta</label>
+              <input class="campo-entrada campo-fecha" type="date" id="mov_hasta" aria-label="Fecha hasta">
+              <button id="mov_filtrar" class="boton boton-borde" type="button">Filtrar</button>
+              <button id="mov_limpiar" class="boton-mini" type="button">Limpiar</button>
+            </div>
             <div class="tabla-envoltura">
               <table>
                 <thead>
@@ -219,6 +237,10 @@
             </div>
 
             <span class="campo-etiqueta">Productos de la boleta</span>
+            <div class="campo-escaner">
+              <input class="campo-entrada" type="text" id="v_escaner" placeholder="Escanee el codigo de barras (agrega 1 unidad)">
+              <button class="boton boton-borde" type="button" id="v_escaner_camara">Camara</button>
+            </div>
             <div class="renglon-agregar">
               <select class="campo-select" id="v_producto" aria-label="Producto a agregar"></select>
               <input class="campo-entrada campo-cantidad" type="number" id="v_cantidad" min="1" step="1" placeholder="Cant." aria-label="Cantidad">
@@ -386,13 +408,22 @@
 
       <!-- Vista de reportes -->
       <section id="vista_reportes" class="vista" hidden>
+        <div class="herramientas herramientas-compactas">
+          <label class="campo-fecha-etiqueta" for="rep_desde">Desde</label>
+          <input class="campo-entrada campo-fecha" type="date" id="rep_desde" aria-label="Fecha desde">
+          <label class="campo-fecha-etiqueta" for="rep_hasta">Hasta</label>
+          <input class="campo-entrada campo-fecha" type="date" id="rep_hasta" aria-label="Fecha hasta">
+          <button id="rep_filtrar" class="boton boton-borde" type="button">Filtrar</button>
+          <button id="rep_limpiar" class="boton-mini" type="button">Ultimos 7 dias</button>
+          <button id="rep_pdf" class="boton boton-auto" type="button">Descargar PDF</button>
+        </div>
         <div class="rejilla-reportes">
           <div class="tarjeta">
             <h2 class="tarjeta-titulo">Valor por categoria</h2>
             <div id="grafico_categorias" class="grafico"></div>
           </div>
           <div class="tarjeta">
-            <h2 class="tarjeta-titulo">Movimientos de los ultimos 7 dias</h2>
+            <h2 class="tarjeta-titulo" id="titulo_grafico_dias">Movimientos de los ultimos 7 dias</h2>
             <div id="grafico_dias" class="grafico"></div>
             <div class="leyenda">
               <span class="leyenda-item leyenda-entrada">Entradas</span>
@@ -478,6 +509,28 @@
 
       <!-- Vista de auditoria (solo gerencia) -->
       <section id="vista_auditoria" class="vista" hidden>
+
+        <div class="tarjeta tarjeta-respaldos">
+          <div class="herramientas herramientas-respaldos">
+            <h2 class="tarjeta-titulo">Respaldos de la base de datos</h2>
+            <button id="resp_crear" class="boton boton-borde" type="button">Respaldar ahora</button>
+          </div>
+          <p class="subtitulo" id="resp_info"></p>
+          <div class="tabla-envoltura">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Archivo</th>
+                  <th scope="col">Fecha</th>
+                  <th scope="col">Tamano</th>
+                  <th scope="col">Accion</th>
+                </tr>
+              </thead>
+              <tbody id="tabla_respaldos"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="tabla-envoltura">
           <table>
             <thead>
@@ -626,6 +679,14 @@
           <label class="campo-etiqueta" for="p_minimo">Stock minimo para alerta</label>
           <input class="campo-entrada" type="number" id="p_minimo" name="minimo" step="1" min="0" value="10" required>
         </div>
+
+        <div class="campo">
+          <label class="campo-etiqueta" for="p_codigo_barras">Codigo de barras <span class="opcional">(opcional)</span></label>
+          <div class="campo-escaner">
+            <input class="campo-entrada" type="text" id="p_codigo_barras" name="codigo_barras" maxlength="64">
+            <button class="boton boton-borde" type="button" id="p_escanear">Escanear</button>
+          </div>
+        </div>
       </div>
       <div class="modal-pie">
         <button class="boton boton-auto" type="submit">Guardar producto</button>
@@ -748,7 +809,20 @@
     </div>
     <div class="modal-pie no-imprimir">
       <button class="boton boton-borde" type="button" data-cerrar="modal_boleta">Cerrar</button>
+      <button class="boton boton-borde" type="button" id="boton_pdf_boleta" hidden>Descargar PDF</button>
       <button class="boton boton-auto" type="button" id="boton_imprimir_boleta">Imprimir</button>
+    </div>
+  </dialog>
+
+  <!-- Ventana del lector de codigo de barras por camara -->
+  <dialog id="modal_escaner">
+    <div class="modal-cabecera">
+      <h3>Escanear codigo de barras</h3>
+      <button class="modal-cerrar" type="button" id="escaner_cerrar" aria-label="Cerrar">&times;</button>
+    </div>
+    <div class="modal-cuerpo">
+      <p class="subtitulo">Apunte la camara al codigo de barras del producto.</p>
+      <video id="escaner_video" class="escaner-video" autoplay muted playsinline></video>
     </div>
   </dialog>
 
@@ -757,6 +831,7 @@
   <script src="js/api.js"></script>
   <script src="js/qrcode.js"></script>
   <script src="js/qr.js"></script>
+  <script src="js/escaner.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

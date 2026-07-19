@@ -710,6 +710,23 @@ tbody tr:hover { background: rgba(233, 185, 68, 0.07); }
   margin-bottom: 1rem;
 }
 
+.tarjeta-respaldos { margin-bottom: 1.5rem; }
+
+.herramientas-respaldos {
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.herramientas-respaldos .tarjeta-titulo { margin: 0; }
+
+.campo-fecha-etiqueta {
+  font-size: 0.85rem;
+  color: var(--tinta-suave);
+  white-space: nowrap;
+}
+
+.herramientas .campo-fecha { width: auto; min-width: 0; }
+
 .tabla-mini {
   overflow-x: auto;
 }
@@ -896,6 +913,22 @@ dialog::backdrop { background: rgba(10, 40, 44, 0.6); }
 .modal-cuerpo { padding: 1.5rem 1.25rem; }
 
 .modal-doble { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+.escaner-video {
+  width: 100%;
+  max-height: 60vh;
+  background: #000;
+  border-radius: 4px;
+}
+
+.campo-escaner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.campo-escaner .campo-entrada { flex: 1; }
 
 .modal-pie {
   display: flex;

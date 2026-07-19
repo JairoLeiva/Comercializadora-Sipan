@@ -1,20 +1,43 @@
 /* Servidor del sistema SIPAN */
-/* Lo hice en Node puro con SQLite, sin librerias externas */
+/* Lo hice en Node puro con SQLite, mas pdfkit y nodemailer para el PDF y el correo */
 /* Lo arranco con: node servidor.js */
 
 const http = require("node:http");
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { DatabaseSync } = require("node:sqlite");
+const { DatabaseSync, backup } = require("node:sqlite");
+const PDFDocument = require("pdfkit");
+const nodemailer = require("nodemailer");
 const Validacion = require("./publico/js/validacion.js");
+
+/* Cargo las variables del .env si existe, sin instalar nada nuevo */
+(function cargarEnv() {
+  const rutaEnv = path.join(__dirname, ".env");
+  if (!fs.existsSync(rutaEnv)) return;
+  for (const linea of fs.readFileSync(rutaEnv, "utf8").split("\n")) {
+    const limpia = linea.trim();
+    if (!limpia || limpia.startsWith("#")) continue;
+    const igual = limpia.indexOf("=");
+    if (igual === -1) continue;
+    const clave = limpia.slice(0, igual).trim();
+    let valor = limpia.slice(igual + 1).trim();
+    if ((valor.startsWith('"') && valor.endsWith('"')) || (valor.startsWith("'") && valor.endsWith("'")))
+      valor = valor.slice(1, -1);
+    if (!(clave in process.env)) process.env[clave] = valor;
+  }
+})();
 
 const PUERTO = Number(process.env.PUERTO) || 3004;
 const RUTA_BD = process.env.BD || path.join(__dirname, "datos", "sipan.db");
 const CARPETA_PUBLICA = path.join(__dirname, "publico");
+const CARPETA_RESPALDOS = process.env.CARPETA_RESPALDOS || path.join(__dirname, "respaldos");
+const MAX_RESPALDOS = 14;
+const HORAS_ENTRE_RESPALDOS = 24;
 const MINUTOS_SESION = 30;
 const MAX_INTENTOS = 5;
 const MINUTOS_BLOQUEO = 5;
+const MINUTOS_RECUPERACION = 30;
 const CLAVE_GERENTE_INICIAL = "Sipan2026";
 /* Esta es mi clave secreta de reCAPTCHA; el servidor valida el captcha con Google */
 const SECRETO_RECAPTCHA = process.env.SECRETO_RECAPTCHA !== undefined
@@ -96,6 +119,13 @@ bd.exec(`
     csrf TEXT NOT NULL,
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
     vence INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS recuperaciones (
+    token TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    vence INTEGER NOT NULL,
+    usado INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS intentos (
@@ -199,6 +229,14 @@ function migrar() {
     bd.exec("ALTER TABLE usuarios ADD COLUMN dosfa_secreto TEXT");
   if (!colUsuarios.some(c => c.name === "dosfa_respaldo"))
     bd.exec("ALTER TABLE usuarios ADD COLUMN dosfa_respaldo TEXT");
+
+  /* Codigo de barras opcional para escanear el producto */
+  const colProductos = bd.prepare("PRAGMA table_info(productos)").all();
+  if (!colProductos.some(c => c.name === "codigo_barras")) {
+    bd.exec("ALTER TABLE productos ADD COLUMN codigo_barras TEXT");
+    bd.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_codigo_barras " +
+      "ON productos(codigo_barras) WHERE codigo_barras IS NOT NULL");
+  }
 }
 migrar();
 
@@ -244,6 +282,119 @@ function token() {
 }
 
 function ahora() { return new Date().toISOString(); }
+
+/* Envio correos por Gmail si hay credenciales en el env, si no los dejo escritos en consola */
+let transportadorCorreo;
+function transportador() {
+  if (transportadorCorreo !== undefined) return transportadorCorreo;
+  if (!process.env.GMAIL_USUARIO || !process.env.GMAIL_APP_PASSWORD) { transportadorCorreo = null; return null; }
+  transportadorCorreo = nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: process.env.GMAIL_USUARIO, pass: process.env.GMAIL_APP_PASSWORD }
+  });
+  return transportadorCorreo;
+}
+
+async function enviarCorreo(destino, asunto, html) {
+  const t = transportador();
+  if (!t) {
+    console.log("\n[correo simulado, falta GMAIL_USUARIO/GMAIL_APP_PASSWORD en .env]" +
+      "\nPara: " + destino + "\nAsunto: " + asunto + "\n" + html + "\n");
+    return;
+  }
+  await t.sendMail({ from: '"Comercializadora Sipan" <' + process.env.GMAIL_USUARIO + '>', to: destino, subject: asunto, html });
+}
+
+/* Aviso por correo apenas un producto baja de su minimo, no se repite en cada venta despues */
+function avisarSiStockCritico(producto, nuevoStock) {
+  if (producto.stock >= producto.minimo && nuevoStock < producto.minimo) {
+    enviarAvisoStockCritico(producto, nuevoStock)
+      .catch(error => console.error("No se pudo enviar el aviso de stock critico:", error.message));
+  }
+}
+
+async function enviarAvisoStockCritico(producto, stockActual) {
+  const destinatarios = bd.prepare(
+    "SELECT correo FROM usuarios WHERE rol IN ('gerente_general','administrador','reponedor')").all();
+  if (destinatarios.length === 0) return;
+
+  const asunto = "Stock minimo: " + producto.nombre;
+  const html =
+    "<p>El producto <strong>" + escXml(producto.codigo) + " - " + escXml(producto.nombre) +
+    "</strong> llego a un stock de <strong>" + stockActual + "</strong> unidades, por debajo de su minimo (" +
+    producto.minimo + ").</p><p>Conviene reponerlo pronto.</p>";
+
+  for (const d of destinatarios) await enviarCorreo(d.correo, asunto, html);
+}
+
+/* Leo el rango de fechas de la URL, ignoro lo que no venga como AAAA-MM-DD */
+function rangoFechas(url) {
+  const patron = /^\d{4}-\d{2}-\d{2}$/;
+  const desde = url.searchParams.get("desde");
+  const hasta = url.searchParams.get("hasta");
+  return {
+    desde: desde && patron.test(desde) ? desde : null,
+    hasta: hasta && patron.test(hasta) ? hasta : null
+  };
+}
+
+/* Junto todos los numeros del reporte, lo uso tanto para la vista como para el PDF */
+function datosReportes(url) {
+  const { desde, hasta } = rangoFechas(url);
+
+  const porCategoria = bd.prepare(`
+    SELECT c.nombre, COUNT(p.id) AS productos, COALESCE(SUM(p.precio * p.stock), 0) AS valor
+    FROM categorias c LEFT JOIN productos p ON p.categoria_id = c.id AND p.activo = 1
+    GROUP BY c.id ORDER BY valor DESC`).all();
+
+  /* Entradas y salidas del rango elegido, si no pusieron fechas uso los ultimos 7 dias */
+  const diasRango = [];
+  if (desde && hasta && desde <= hasta) {
+    const inicio = new Date(desde + "T00:00:00");
+    const fin = new Date(hasta + "T00:00:00");
+    const totalDias = Math.min(92, Math.round((fin - inicio) / 86400000) + 1);
+    for (let i = 0; i < totalDias; i++)
+      diasRango.push(new Date(inicio.getTime() + i * 86400000).toISOString().slice(0, 10));
+  } else {
+    for (let i = 6; i >= 0; i--) diasRango.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10));
+  }
+  const dias = diasRango.map(dia => {
+    const fila = bd.prepare(`
+      SELECT
+        COALESCE(SUM(CASE WHEN tipo = 'entrada' THEN cantidad END), 0) AS entradas,
+        COALESCE(SUM(CASE WHEN tipo = 'salida' THEN cantidad END), 0) AS salidas
+      FROM movimientos WHERE substr(fecha, 1, 10) = ?`).get(dia);
+    return { dia, entradas: fila.entradas, salidas: fila.salidas };
+  });
+
+  const condicionesMov = [];
+  const parametrosMov = [];
+  if (desde) { condicionesMov.push("substr(m.fecha,1,10) >= ?"); parametrosMov.push(desde); }
+  if (hasta) { condicionesMov.push("substr(m.fecha,1,10) <= ?"); parametrosMov.push(hasta); }
+  const dondeMov = condicionesMov.length ? " WHERE " + condicionesMov.join(" AND ") : "";
+
+  const masMovidos = bd.prepare(`
+    SELECT p.nombre, p.codigo, SUM(m.cantidad) AS unidades
+    FROM movimientos m JOIN productos p ON p.id = m.producto_id` + dondeMov + `
+    GROUP BY p.id ORDER BY unidades DESC LIMIT 5`).all(...parametrosMov);
+
+  const criticos = bd.prepare(`
+    SELECT codigo, nombre, stock, minimo FROM productos
+    WHERE activo = 1 AND stock < minimo ORDER BY stock ASC LIMIT 8`).all();
+
+  const tiposProducto = bd.prepare(`
+    SELECT c.nombre, COUNT(p.id) AS productos,
+      COALESCE(SUM(p.stock), 0) AS unidades,
+      COALESCE(SUM(p.precio * p.stock), 0) AS valor
+    FROM categorias c LEFT JOIN productos p ON p.categoria_id = c.id AND p.activo = 1
+    GROUP BY c.id ORDER BY productos DESC, c.nombre`).all();
+
+  const tickets = bd.prepare(`
+    SELECT tipo, estado, COUNT(*) AS total
+    FROM tickets GROUP BY tipo, estado ORDER BY tipo, estado`).all();
+
+  return { porCategoria, dias, masMovidos, criticos, tiposProducto, tickets, rango: { desde, hasta } };
+}
 
 /* Valido el captcha contra Google. Si no configure la clave secreta, dejo pasar (modo local). */
 async function captchaValido(token, ip) {
@@ -381,6 +532,36 @@ function asegurarGerenteInicial() {
 }
 asegurarGerenteInicial();
 
+/* Respaldo automatico de la base, se guarda en la carpeta respaldos */
+function nombreRespaldo() {
+  const f = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  return "sipan_" + f.getFullYear() + "-" + pad(f.getMonth() + 1) + "-" + pad(f.getDate()) +
+    "_" + pad(f.getHours()) + pad(f.getMinutes()) + pad(f.getSeconds()) + ".db";
+}
+
+async function hacerRespaldo() {
+  fs.mkdirSync(CARPETA_RESPALDOS, { recursive: true });
+  const archivo = nombreRespaldo();
+  await backup(bd, path.join(CARPETA_RESPALDOS, archivo));
+
+  /* Guardo nomas los ultimos respaldos y borro los viejos */
+  const archivos = fs.readdirSync(CARPETA_RESPALDOS)
+    .filter(f => /^sipan_\d{4}-\d{2}-\d{2}_\d{6}\.db$/.test(f))
+    .sort();
+  while (archivos.length > MAX_RESPALDOS) fs.unlinkSync(path.join(CARPETA_RESPALDOS, archivos.shift()));
+
+  return archivo;
+}
+
+hacerRespaldo()
+  .then(archivo => console.log("Respaldo inicial creado: " + archivo))
+  .catch(error => console.error("No se pudo crear el respaldo inicial:", error.message));
+
+setInterval(() => {
+  hacerRespaldo().catch(error => console.error("No se pudo crear el respaldo programado:", error.message));
+}, HORAS_ENTRE_RESPALDOS * 60 * 60000).unref?.();
+
 /* Guardo los logins que estan esperando el codigo 2FA */
 const pendientes2FA = new Map();
 /* Guardo los 2FA que se estan activando pero aun no confirman */
@@ -492,10 +673,11 @@ function cabecerasSeguras(res) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   res.setHeader("Referrer-Policy", "no-referrer");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  /* Dejo usar la camara solo en el sitio, la necesita el lector de codigo de barras */
+  res.setHeader("Permissions-Policy", "camera=(self), microphone=(), geolocation=()");
   res.setHeader("Content-Security-Policy",
     "default-src 'self'; " +
-    "script-src 'self' https://www.google.com https://www.gstatic.com; " +
+    "script-src 'self' https://www.google.com https://www.gstatic.com https://cdn.jsdelivr.net; " +
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "font-src https://fonts.gstatic.com; " +
     "img-src 'self' data:; " +
@@ -725,6 +907,73 @@ const api = {
     });
   },
 
+  /* Respondo siempre lo mismo aca para no revelar si la cuenta existe */
+  "POST /api/recuperar": async (req, res, ip) => {
+    if (excesoDeTrafico(ip, 10, "recuperar")) { fallo(res, 429, "Demasiadas solicitudes. Espere un minuto."); return; }
+
+    const datos = await leerCuerpo(req);
+    if (datos.empresa_web) { fallo(res, 400, "Solicitud rechazada."); return; }
+    if (!(await captchaValido(datos.captcha, ip))) { fallo(res, 400, "No se pudo verificar el captcha. Intente de nuevo."); return; }
+    if (Validacion.vacio(datos.identidad)) { fallo(res, 422, "Ingrese su usuario o correo."); return; }
+
+    const identidad = String(datos.identidad).trim().toLowerCase();
+    const mensaje = "Si el usuario existe, se envio un correo con instrucciones para recuperar el acceso.";
+
+    const cuenta = bd.prepare("SELECT * FROM usuarios WHERE usuario = ? OR correo = ?").get(identidad, identidad);
+    if (!cuenta) { responder(res, 200, { mensaje }); return; }
+
+    const tok = token();
+    bd.prepare("INSERT INTO recuperaciones (token, usuario_id, vence, usado) VALUES (?,?,?,0)")
+      .run(tok, cuenta.id, Date.now() + MINUTOS_RECUPERACION * 60000);
+
+    const protocolo = req.headers["x-forwarded-proto"] || "http";
+    const enlace = protocolo + "://" + (req.headers.host || "localhost") + "/restablecer.html?token=" + tok;
+
+    await enviarCorreo(cuenta.correo, "Recuperar acceso - Sistema Sipan",
+      "<p>Hola " + escXml(cuenta.nombre) + ",</p>" +
+      "<p>Pidieron restablecer la clave de tu cuenta en el sistema de inventario de Comercializadora Sipan.</p>" +
+      '<p><a href="' + enlace + '">Restablecer mi clave</a></p>' +
+      "<p>El enlace vence en " + MINUTOS_RECUPERACION + " minutos. Si no fuiste tu, ignora este correo.</p>");
+
+    auditar(cuenta.usuario, "recuperacion_solicitada", "Se pidio un enlace para restablecer la clave");
+    responder(res, 200, { mensaje });
+  },
+
+  /* Reviso si el enlace todavia sirve antes de mostrar el formulario */
+  "GET /api/recuperar/:token": async (req, res, ip, url, tok) => {
+    const fila = bd.prepare("SELECT * FROM recuperaciones WHERE token = ?").get(tok);
+    if (!fila || fila.usado || Date.now() > fila.vence) { fallo(res, 400, "El enlace no es valido o ya vencio."); return; }
+    responder(res, 200, { valido: true });
+  },
+
+  "POST /api/restablecer": async (req, res, ip) => {
+    if (excesoDeTrafico(ip, 20, "restablecer")) { fallo(res, 429, "Demasiadas solicitudes. Espere un minuto."); return; }
+
+    const datos = await leerCuerpo(req);
+    if (Validacion.vacio(datos.token)) { fallo(res, 422, "El enlace no es valido."); return; }
+
+    const errores = Validacion.clave(datos.clave);
+    if (Validacion.vacio(datos.confirmacion)) errores.push("Debe repetir la clave.");
+    else if (datos.clave !== datos.confirmacion) errores.push("Las claves no coinciden.");
+    if (errores.length) { fallo(res, 422, errores); return; }
+
+    const fila = bd.prepare("SELECT * FROM recuperaciones WHERE token = ?").get(String(datos.token));
+    if (!fila || fila.usado || Date.now() > fila.vence) { fallo(res, 400, "El enlace no es valido o ya vencio."); return; }
+
+    const cuenta = bd.prepare("SELECT * FROM usuarios WHERE id = ?").get(fila.usuario_id);
+    if (!cuenta) { fallo(res, 400, "La cuenta ya no existe."); return; }
+
+    const sal = crypto.randomBytes(16).toString("hex");
+    bd.prepare("UPDATE usuarios SET sal = ?, clave_hash = ? WHERE id = ?")
+      .run(sal, hashClave(datos.clave, sal), cuenta.id);
+    bd.prepare("UPDATE recuperaciones SET usado = 1 WHERE token = ?").run(fila.token);
+    bd.prepare("DELETE FROM sesiones WHERE usuario_id = ?").run(cuenta.id);
+    limpiarFallos(String(cuenta.usuario).toLowerCase());
+
+    auditar(cuenta.usuario, "clave_restablecida", "Clave restablecida mediante enlace de recuperacion");
+    responder(res, 200, { mensaje: "Su clave fue actualizada. Ya puede iniciar sesion." });
+  },
+
   "POST /api/salir": async (req, res) => {
     const sesion = exigirSesion(req, res, true);
     if (!sesion) return;
@@ -945,6 +1194,20 @@ const api = {
     });
   },
 
+  /* La usa el lector de codigo de barras, sea USB o camara */
+  "GET /api/productos/codigo/:codigo": async (req, res, ip, url, codigoBarras) => {
+    const sesion = exigirSesion(req, res, false);
+    if (!sesion) return;
+
+    const producto = bd.prepare(`
+      SELECT p.*, c.nombre AS categoria FROM productos p
+      JOIN categorias c ON c.id = p.categoria_id
+      WHERE p.codigo_barras = ? AND p.activo = 1`).get(codigoBarras);
+
+    if (!producto) { fallo(res, 404, "Ningun producto tiene ese codigo de barras."); return; }
+    responder(res, 200, producto);
+  },
+
   "POST /api/productos": async (req, res) => {
     const sesion = exigirSesion(req, res, true);
     if (!sesion) return;
@@ -962,14 +1225,19 @@ const api = {
       fallo(res, 422, "La categoria elegida no existe."); return;
     }
 
+    const codigoBarras = Validacion.vacio(datos.codigo_barras) ? null : String(datos.codigo_barras).trim();
+    if (codigoBarras && bd.prepare("SELECT id FROM productos WHERE codigo_barras = ?").get(codigoBarras)) {
+      fallo(res, 409, "Ya existe un producto con ese codigo de barras."); return;
+    }
+
     const mayor = bd.prepare("SELECT MAX(CAST(substr(codigo, 3) AS INTEGER)) AS n FROM productos").get().n || 0;
     const codigo = "P-" + String(mayor + 1).padStart(4, "0");
 
     bd.prepare(`INSERT INTO productos
-      (codigo, nombre, nombre_clave, categoria_id, precio, stock, minimo, activo, creado, actualizado)
-      VALUES (?,?,?,?,?,?,?,1,?,?)`)
+      (codigo, nombre, nombre_clave, categoria_id, precio, stock, minimo, codigo_barras, activo, creado, actualizado)
+      VALUES (?,?,?,?,?,?,?,?,1,?,?)`)
       .run(codigo, nombre, nombre.toLowerCase(), Number(datos.categoria_id),
-        Number(Number(datos.precio).toFixed(2)), Number(datos.stock), Number(datos.minimo), ahora(), ahora());
+        Number(Number(datos.precio).toFixed(2)), Number(datos.stock), Number(datos.minimo), codigoBarras, ahora(), ahora());
 
     auditar(sesion.usuario, "producto_nuevo", codigo + " " + nombre);
     responder(res, 201, { mensaje: "Producto registrado.", codigo });
@@ -993,11 +1261,17 @@ const api = {
       fallo(res, 409, "Ya existe otro producto con ese nombre."); return;
     }
 
+    const codigoBarras = Validacion.vacio(datos.codigo_barras) ? null : String(datos.codigo_barras).trim();
+    if (codigoBarras && bd.prepare("SELECT id FROM productos WHERE codigo_barras = ? AND id != ?")
+      .get(codigoBarras, producto.id)) {
+      fallo(res, 409, "Ya existe otro producto con ese codigo de barras."); return;
+    }
+
     bd.prepare(`UPDATE productos SET nombre = ?, nombre_clave = ?, categoria_id = ?,
-      precio = ?, stock = ?, minimo = ?, actualizado = ? WHERE id = ?`)
+      precio = ?, stock = ?, minimo = ?, codigo_barras = ?, actualizado = ? WHERE id = ?`)
       .run(nombre, nombre.toLowerCase(), Number(datos.categoria_id),
         Number(Number(datos.precio).toFixed(2)), Number(datos.stock), Number(datos.minimo),
-        ahora(), producto.id);
+        codigoBarras, ahora(), producto.id);
 
     auditar(sesion.usuario, "producto_editado", producto.codigo + " " + nombre);
     responder(res, 200, { mensaje: "Producto actualizado." });
@@ -1033,12 +1307,20 @@ const api = {
 
     const pagina = Math.max(1, Number(url.searchParams.get("pagina")) || 1);
     const limite = 10;
-    const total = bd.prepare("SELECT COUNT(*) AS n FROM movimientos").get().n;
+    const { desde, hasta } = rangoFechas(url);
+
+    const condiciones = [];
+    const parametros = [];
+    if (desde) { condiciones.push("substr(m.fecha,1,10) >= ?"); parametros.push(desde); }
+    if (hasta) { condiciones.push("substr(m.fecha,1,10) <= ?"); parametros.push(hasta); }
+    const dondeSql = condiciones.length ? " WHERE " + condiciones.join(" AND ") : "";
+
+    const total = bd.prepare("SELECT COUNT(*) AS n FROM movimientos m" + dondeSql).get(...parametros).n;
 
     const filas = bd.prepare(`
       SELECT m.*, p.nombre AS producto, p.codigo FROM movimientos m
-      JOIN productos p ON p.id = m.producto_id
-      ORDER BY m.id DESC LIMIT ? OFFSET ?`).all(limite, (pagina - 1) * limite);
+      JOIN productos p ON p.id = m.producto_id` + dondeSql + `
+      ORDER BY m.id DESC LIMIT ? OFFSET ?`).all(...parametros, limite, (pagina - 1) * limite);
 
     responder(res, 200, { filas, total, pagina, paginas: Math.max(1, Math.ceil(total / limite)) });
   },
@@ -1072,6 +1354,7 @@ const api = {
         .run(producto.id, datos.tipo, cantidad, String(datos.motivo).trim(), sesion.usuario, ahora());
 
       bd.exec("COMMIT");
+      avisarSiStockCritico(producto, nuevoStock);
       auditar(sesion.usuario, "movimiento",
         datos.tipo + " de " + cantidad + " x " + producto.nombre);
       responder(res, 201, { mensaje: "Movimiento registrado. Nuevo stock: " + nuevoStock + "." });
@@ -1144,6 +1427,7 @@ const api = {
             String(datos.detalle).trim(), cantidad, sesion.usuario, momento, momento);
 
         bd.exec("COMMIT");
+        avisarSiStockCritico(producto, nuevoStock);
         auditar(sesion.usuario, "venta",
           "Venta de " + cantidad + " x " + producto.nombre + ". Nuevo stock: " + nuevoStock + ".");
         responder(res, 201, { mensaje: "Venta registrada. Nuevo stock: " + nuevoStock + "." });
@@ -1191,6 +1475,7 @@ const api = {
     bd.exec("BEGIN");
     try {
       const items = [];
+      const paraAvisar = [];
       let subtotal = 0;
 
       for (const linea of datos.items) {
@@ -1218,6 +1503,7 @@ const api = {
           producto_id: producto.id, codigo: producto.codigo, nombre: producto.nombre,
           cantidad, precio: producto.precio, importe
         });
+        paraAvisar.push({ producto, nuevoStock });
       }
 
       subtotal = Number(subtotal.toFixed(2));
@@ -1247,6 +1533,7 @@ const api = {
         insItem.run(boletaId, it.producto_id, it.codigo, it.nombre, it.cantidad, it.precio, it.importe);
 
       bd.exec("COMMIT");
+      paraAvisar.forEach(a => avisarSiStockCritico(a.producto, a.nuevoStock));
       auditar(sesion.usuario, "venta_mayorista",
         "Boleta " + numero + " a " + String(datos.cliente).trim() + " por " + total +
         (descuentoPct ? " (dscto " + descuentoPct + "%)" : ""));
@@ -1254,7 +1541,7 @@ const api = {
       responder(res, 201, {
         mensaje: "Boleta " + numero + " emitida.",
         boleta: {
-          numero, cliente: String(datos.cliente).trim(),
+          id: boletaId, numero, cliente: String(datos.cliente).trim(),
           documento: datos.documento || "", direccion: datos.direccion || "",
           observacion: datos.observacion || "",
           subtotal, descuento_pct: descuentoPct, descuento_monto: descuentoMonto, total,
@@ -1289,47 +1576,39 @@ const api = {
     responder(res, 200, { boleta, items });
   },
 
-  "GET /api/reportes": async (req, res) => {
+  "GET /api/ventas/boleta/:id/pdf": async (req, res, ip, url, id) => {
+    const sesion = exigirSesion(req, res, false);
+    if (!sesion || !exigirPermiso(sesion, res, "vender", "ver boletas")) return;
+
+    const boleta = bd.prepare("SELECT * FROM boletas WHERE id = ?").get(Number(id));
+    if (!boleta) { fallo(res, 404, "La boleta no existe."); return; }
+    const items = bd.prepare("SELECT * FROM boleta_items WHERE boleta_id = ? ORDER BY id").all(boleta.id);
+
+    const pdf = await construirPdfBoleta(boleta, items);
+    auditar(sesion.usuario, "exportacion", "Descarga de boleta " + boleta.numero + " en PDF");
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'attachment; filename="boleta_' + boleta.numero + '.pdf"'
+    });
+    res.end(pdf);
+  },
+
+  "GET /api/reportes": async (req, res, ip, url) => {
     if (!exigirSesion(req, res, false)) return;
+    responder(res, 200, datosReportes(url));
+  },
 
-    const porCategoria = bd.prepare(`
-      SELECT c.nombre, COUNT(p.id) AS productos, COALESCE(SUM(p.precio * p.stock), 0) AS valor
-      FROM categorias c LEFT JOIN productos p ON p.categoria_id = c.id AND p.activo = 1
-      GROUP BY c.id ORDER BY valor DESC`).all();
+  "GET /api/reportes/pdf": async (req, res, ip, url) => {
+    const sesion = exigirSesion(req, res, false);
+    if (!sesion) return;
 
-    /* Entradas y salidas de los ultimos 7 dias */
-    const dias = [];
-    for (let i = 6; i >= 0; i--) {
-      const dia = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
-      const fila = bd.prepare(`
-        SELECT
-          COALESCE(SUM(CASE WHEN tipo = 'entrada' THEN cantidad END), 0) AS entradas,
-          COALESCE(SUM(CASE WHEN tipo = 'salida' THEN cantidad END), 0) AS salidas
-        FROM movimientos WHERE substr(fecha, 1, 10) = ?`).get(dia);
-      dias.push({ dia, entradas: fila.entradas, salidas: fila.salidas });
-    }
-
-    const masMovidos = bd.prepare(`
-      SELECT p.nombre, p.codigo, SUM(m.cantidad) AS unidades
-      FROM movimientos m JOIN productos p ON p.id = m.producto_id
-      GROUP BY p.id ORDER BY unidades DESC LIMIT 5`).all();
-
-    const criticos = bd.prepare(`
-      SELECT codigo, nombre, stock, minimo FROM productos
-      WHERE activo = 1 AND stock < minimo ORDER BY stock ASC LIMIT 8`).all();
-
-    const tiposProducto = bd.prepare(`
-      SELECT c.nombre, COUNT(p.id) AS productos,
-        COALESCE(SUM(p.stock), 0) AS unidades,
-        COALESCE(SUM(p.precio * p.stock), 0) AS valor
-      FROM categorias c LEFT JOIN productos p ON p.categoria_id = c.id AND p.activo = 1
-      GROUP BY c.id ORDER BY productos DESC, c.nombre`).all();
-
-    const tickets = bd.prepare(`
-      SELECT tipo, estado, COUNT(*) AS total
-      FROM tickets GROUP BY tipo, estado ORDER BY tipo, estado`).all();
-
-    responder(res, 200, { porCategoria, dias, masMovidos, criticos, tiposProducto, tickets });
+    const pdf = await construirPdfReporte(datosReportes(url), sesion.usuario);
+    auditar(sesion.usuario, "exportacion", "Descarga del reporte en PDF");
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": 'attachment; filename="reporte_sipan.pdf"'
+    });
+    res.end(pdf);
   },
 
   "GET /api/auditoria": async (req, res, ip, url) => {
@@ -1343,6 +1622,50 @@ const api = {
       .all(limite, (pagina - 1) * limite);
 
     responder(res, 200, { filas, total, pagina, paginas: Math.max(1, Math.ceil(total / limite)) });
+  },
+
+  "GET /api/respaldos": async (req, res) => {
+    const sesion = exigirSesion(req, res, false);
+    if (!sesion || !exigirAdmin(sesion, res)) return;
+
+    fs.mkdirSync(CARPETA_RESPALDOS, { recursive: true });
+    const archivos = fs.readdirSync(CARPETA_RESPALDOS)
+      .filter(f => /^sipan_\d{4}-\d{2}-\d{2}_\d{6}\.db$/.test(f))
+      .map(nombre => {
+        const info = fs.statSync(path.join(CARPETA_RESPALDOS, nombre));
+        return { nombre, tamano: info.size, creado: info.mtime.toISOString() };
+      })
+      .sort((a, b) => b.nombre.localeCompare(a.nombre));
+
+    responder(res, 200, { archivos, maximo: MAX_RESPALDOS, horas: HORAS_ENTRE_RESPALDOS });
+  },
+
+  "POST /api/respaldos": async (req, res) => {
+    const sesion = exigirSesion(req, res, true);
+    if (!sesion || !exigirAdmin(sesion, res)) return;
+
+    try {
+      const archivo = await hacerRespaldo();
+      auditar(sesion.usuario, "respaldo_manual", "Respaldo creado a pedido: " + archivo);
+      responder(res, 201, { mensaje: "Respaldo creado: " + archivo, archivo });
+    } catch (error) {
+      fallo(res, 500, "No se pudo crear el respaldo: " + error.message);
+    }
+  },
+
+  "GET /api/respaldos/:archivo": async (req, res, ip, url, archivo) => {
+    const sesion = exigirSesion(req, res, false);
+    if (!sesion || !exigirAdmin(sesion, res)) return;
+
+    const ruta = path.join(CARPETA_RESPALDOS, archivo);
+    if (!fs.existsSync(ruta)) { fallo(res, 404, "El respaldo no existe."); return; }
+
+    auditar(sesion.usuario, "respaldo_descargado", "Descarga del respaldo " + archivo);
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Disposition": 'attachment; filename="' + archivo + '"'
+    });
+    fs.createReadStream(ruta).pipe(res);
   },
 
   "GET /api/exportar": async (req, res) => {
@@ -1618,6 +1941,127 @@ function construirExcelInventario(filas, resumen, usuario) {
   return armarZip(archivos);
 }
 
+/* Armo un pdfkit y junto sus bytes en un Buffer */
+function pdfABuffer(construir) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 40 });
+    const partes = [];
+    doc.on("data", chunk => partes.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(partes)));
+    doc.on("error", reject);
+    construir(doc);
+    doc.end();
+  });
+}
+
+const moneda = valor => "S/ " + Number(valor).toFixed(2);
+
+/* Arma el PDF de la boleta, parecido a como se ve al imprimir */
+function construirPdfBoleta(boleta, items) {
+  return pdfABuffer(doc => {
+    doc.fontSize(15).fillColor("#0F3A40").text("COMERCIALIZADORA SIPAN S.A.C.");
+    doc.fontSize(9).fillColor("#4A5650")
+      .text("Distribucion mayorista de abarrotes - Chiclayo, Lambayeque, Peru")
+      .text("RUC 20xxxxxxxxx");
+    doc.moveDown(0.6);
+    doc.fontSize(12).fillColor("#121A16").text("BOLETA DE VENTA " + boleta.numero, { align: "right" });
+    doc.moveDown(0.8);
+
+    doc.fontSize(10).fillColor("#121A16");
+    doc.text("Cliente: " + boleta.cliente);
+    if (boleta.documento) doc.text("RUC/DNI: " + boleta.documento);
+    if (boleta.direccion) doc.text("Direccion: " + boleta.direccion);
+    doc.text("Fecha: " + new Date(boleta.creado).toLocaleString("es-PE"));
+    doc.text("Atendio: " + boleta.vendedor);
+    doc.moveDown();
+
+    /* Tabla de productos */
+    const x0 = 40, anchoTabla = 515, alto = 20;
+    const columnas = [
+      { titulo: "Codigo", x: 0, ancho: 65 },
+      { titulo: "Descripcion", x: 65, ancho: 220 },
+      { titulo: "Cant.", x: 285, ancho: 50, align: "right" },
+      { titulo: "P. Unit.", x: 335, ancho: 90, align: "right" },
+      { titulo: "Importe", x: 425, ancho: 90, align: "right" }
+    ];
+
+    let y = doc.y;
+    const filaCabecera = () => {
+      doc.rect(x0, y, anchoTabla, alto).fill("#0F3A40");
+      doc.fontSize(9).fillColor("#FFFFFF");
+      columnas.forEach(c => doc.text(c.titulo, x0 + c.x + 4, y + 5, { width: c.ancho - 8, align: c.align || "left" }));
+      y += alto;
+    };
+    filaCabecera();
+
+    items.forEach((it, idx) => {
+      if (y > 760) { doc.addPage(); y = 40; filaCabecera(); }
+      if (idx % 2 === 0) doc.rect(x0, y, anchoTabla, alto).fill("#F2F4EF");
+      doc.fontSize(9).fillColor("#121A16");
+      doc.text(it.codigo, x0 + columnas[0].x + 4, y + 5, { width: columnas[0].ancho - 8 });
+      doc.text(it.nombre, x0 + columnas[1].x + 4, y + 5, { width: columnas[1].ancho - 8 });
+      doc.text(String(it.cantidad), x0 + columnas[2].x + 4, y + 5, { width: columnas[2].ancho - 8, align: "right" });
+      doc.text(moneda(it.precio), x0 + columnas[3].x + 4, y + 5, { width: columnas[3].ancho - 8, align: "right" });
+      doc.text(moneda(it.importe), x0 + columnas[4].x + 4, y + 5, { width: columnas[4].ancho - 8, align: "right" });
+      y += alto;
+    });
+
+    y += 14;
+    doc.fontSize(10).fillColor("#121A16").text("Subtotal", 355, y, { width: 100 });
+    doc.text(moneda(boleta.subtotal), 455, y, { width: 100, align: "right" });
+    y += 16;
+    if (boleta.descuento_pct > 0) {
+      doc.text("Descuento (" + boleta.descuento_pct + "%)", 355, y, { width: 100 });
+      doc.text("-" + moneda(boleta.descuento_monto), 455, y, { width: 100, align: "right" });
+      y += 16;
+    }
+    doc.fontSize(12).text("TOTAL", 355, y, { width: 100 });
+    doc.text(moneda(boleta.total), 455, y, { width: 100, align: "right" });
+
+    if (boleta.observacion) {
+      doc.moveDown(3);
+      doc.fontSize(9).fillColor("#4A5650").text("Observacion: " + boleta.observacion);
+    }
+
+    doc.moveDown(2);
+    doc.fontSize(9).fillColor("#4A5650").text("Gracias por su compra.", { align: "center" });
+  });
+}
+
+/* Arma el PDF con los mismos datos que se ven en la pantalla de reportes */
+function construirPdfReporte(datos, usuario) {
+  return pdfABuffer(doc => {
+    doc.fontSize(15).fillColor("#0F3A40").text("COMERCIALIZADORA SIPAN S.A.C.");
+    doc.fontSize(9).fillColor("#4A5650").text("Reporte de inventario y movimientos");
+    const etiquetaRango = datos.rango.desde && datos.rango.hasta
+      ? "Rango: " + datos.rango.desde + " al " + datos.rango.hasta
+      : "Rango: ultimos 7 dias";
+    doc.text(etiquetaRango + "  -  Emitido " + new Date().toLocaleString("es-PE") + " por " + usuario);
+    doc.moveDown();
+
+    const seccion = titulo => { doc.moveDown(0.6); doc.fontSize(12).fillColor("#0F3A40").text(titulo); doc.moveDown(0.2); };
+    const linea = texto => doc.fontSize(9).fillColor("#121A16").text(texto);
+
+    seccion("Valor de inventario por categoria");
+    datos.porCategoria.forEach(c => linea(c.nombre + ":  " + c.productos + " productos  -  " + moneda(c.valor)));
+
+    seccion("Movimientos del periodo");
+    datos.dias.forEach(d => linea(d.dia + ":  entradas " + d.entradas + "  /  salidas " + d.salidas));
+
+    seccion("Productos con mas movimiento");
+    if (datos.masMovidos.length === 0) linea("Sin movimientos en el periodo.");
+    datos.masMovidos.forEach(m => linea(m.codigo + " " + m.nombre + ":  " + m.unidades + " unidades"));
+
+    seccion("Stock critico");
+    if (datos.criticos.length === 0) linea("Ningun producto esta bajo su minimo.");
+    datos.criticos.forEach(p => linea(p.codigo + " " + p.nombre + ":  stock " + p.stock + " / minimo " + p.minimo));
+
+    seccion("Tickets y notas");
+    if (datos.tickets.length === 0) linea("Aun no hay tickets registrados.");
+    datos.tickets.forEach(t => linea(t.tipo + " (" + t.estado + "):  " + t.total));
+  });
+}
+
 /* Sirvo los archivos estaticos (html, css, js, imagenes) */
 
 const MIMES = {
@@ -1663,11 +2107,32 @@ const servidor = http.createServer(async (req, res) => {
         if (api[patron]) { await api[patron](req, res, ip, url, conId[2]); return; }
       }
 
-      /* Ruta de una boleta por su id */
-      const boletaId = url.pathname.match(/^\/api\/ventas\/boleta\/(\d+)$/);
+      /* La boleta por su id, con o sin PDF */
+      const boletaId = url.pathname.match(/^\/api\/ventas\/boleta\/(\d+)(\/pdf)?$/);
       if (boletaId) {
-        const patron = req.method + " /api/ventas/boleta/:id";
+        const patron = req.method + " /api/ventas/boleta/:id" + (boletaId[2] || "");
         if (api[patron]) { await api[patron](req, res, ip, url, boletaId[1]); return; }
+      }
+
+      /* El token de recuperacion de clave */
+      const tokenRecuperacion = url.pathname.match(/^\/api\/recuperar\/([a-f0-9]{16,80})$/);
+      if (tokenRecuperacion) {
+        const patron = req.method + " /api/recuperar/:token";
+        if (api[patron]) { await api[patron](req, res, ip, url, tokenRecuperacion[1]); return; }
+      }
+
+      /* El producto por su codigo de barras */
+      const codigoBarras = url.pathname.match(/^\/api\/productos\/codigo\/([a-zA-Z0-9-]{4,64})$/);
+      if (codigoBarras) {
+        const patron = req.method + " /api/productos/codigo/:codigo";
+        if (api[patron]) { await api[patron](req, res, ip, url, codigoBarras[1]); return; }
+      }
+
+      /* El archivo de respaldo para descargar */
+      const archivoRespaldo = url.pathname.match(/^\/api\/respaldos\/(sipan_\d{4}-\d{2}-\d{2}_\d{6}\.db)$/);
+      if (archivoRespaldo) {
+        const patron = req.method + " /api/respaldos/:archivo";
+        if (api[patron]) { await api[patron](req, res, ip, url, archivoRespaldo[1]); return; }
       }
 
       fallo(res, 404, "Ruta de API no encontrada.");

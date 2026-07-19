@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Elegir una clave nueva para el sistema de inventario Sipan">
+  <title>Restablecer clave | SIPAN Inventario</title>
+  <link rel="icon" type="image/svg+xml" href="img/logo.svg">
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+
+  <main class="acceso">
+
+    <section class="acceso-banda">
+      <div class="acceso-marca">
+        <img src="img/logo.svg" alt="Logo SIPAN" width="40" height="40">
+        <span>Comercializadora Sipan S.A.C.</span>
+      </div>
+
+      <div class="acceso-titulo">
+        <h1>Elija<br>una clave<br><em>nueva.</em></h1>
+        <p>Por seguridad, al confirmar se cerraran todas las sesiones abiertas de esta cuenta.</p>
+      </div>
+
+      <p class="acceso-pie">Sistema interno v1.0 / Acceso restringido</p>
+    </section>
+
+    <section class="acceso-cuerpo">
+      <div class="tarjeta-acceso">
+        <h2>Restablecer clave</h2>
+        <p class="subtitulo" id="subtitulo_restablecer">Verificando el enlace...</p>
+
+        <div id="aviso_restablecer" class="aviso" hidden></div>
+
+        <form id="form_restablecer" novalidate hidden>
+          <div class="campo">
+            <label class="campo-etiqueta" for="clave">Clave nueva</label>
+            <input class="campo-entrada" type="password" id="clave" name="clave"
+                   autocomplete="new-password" maxlength="72" required>
+            <div class="fuerza"><div id="fuerza_barra" class="fuerza-relleno"></div></div>
+            <span id="fuerza_texto" class="fuerza-texto"></span>
+          </div>
+
+          <div class="campo">
+            <label class="campo-etiqueta" for="confirmacion">Repetir clave</label>
+            <input class="campo-entrada" type="password" id="confirmacion" name="confirmacion"
+                   autocomplete="new-password" maxlength="72" required>
+          </div>
+
+          <button class="boton" type="submit">Guardar clave nueva</button>
+        </form>
+
+        <p class="enlace-acceso">
+          <a href="index.html">Volver a iniciar sesion</a>
+        </p>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="js/ui.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/validacion.js"></script>
+  <script src="js/recuperar.js"></script>
+</body>
+</html>
